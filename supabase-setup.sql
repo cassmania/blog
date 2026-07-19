@@ -49,6 +49,14 @@ create table if not exists custom_pages (
   updated_at timestamptz
 );
 
+-- 테이블 접근 권한 (RLS 정책은 이 위에서 다시 거른다)
+grant usage on schema public to anon, authenticated;
+grant select on posts, boards, comments, settings, custom_pages to anon;
+grant insert on comments to anon;
+grant execute on all functions in schema public to anon, authenticated;
+grant all on posts, boards, comments, settings, custom_pages to authenticated;
+grant usage, select on all sequences in schema public to authenticated;
+
 -- RLS 활성화
 alter table boards enable row level security;
 alter table posts enable row level security;
