@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+<div id="scroll-progress" aria-hidden="true"></div>
 
 <header class="site-header">
   <a href="#/" class="logo">丕刀卜己卜人丨廿卜</a>
@@ -175,14 +176,25 @@
       <div class="field" id="editor-field">
         <label>본문</label>
         <div class="editor-toolbar">
-          <button type="button" data-cmd="bold"><b>B</b></button>
-          <button type="button" data-cmd="italic"><i>I</i></button>
-          <button type="button" data-cmd="underline"><u>U</u></button>
-          <button type="button" data-cmd="strikeThrough"><s>S</s></button>
-          <button type="button" data-cmd="insertUnorderedList">• 목록</button>
+          <button type="button" data-cmd="bold" title="굵게"><b>굵게</b></button>
+          <button type="button" data-cmd="italic" title="기울임"><i>기울임</i></button>
+          <button type="button" data-cmd="underline" title="밑줄"><u>밑줄</u></button>
+          <button type="button" data-cmd="strikeThrough" title="취소선"><s>취소선</s></button>
+          <button type="button" data-cmd="insertUnorderedList">목록</button>
           <button type="button" data-cmd="formatBlock" data-value="h2">제목</button>
           <button type="button" data-cmd="formatBlock" data-value="blockquote">인용</button>
-          <button type="button" id="btn-image">이미지 URL</button>
+          <label class="tool-label">글자색 <input type="color" id="font-color" value="#18181b" title="글자 색상"></label>
+          <label class="tool-label">크기
+            <select id="font-size" title="글자 크기">
+              <option value="">기본</option>
+              <option value="1">아주 작게</option>
+              <option value="2">작게</option>
+              <option value="4">크게</option>
+              <option value="5">더 크게</option>
+              <option value="6">아주 크게</option>
+            </select>
+          </label>
+          <button type="button" id="btn-image">이미지 주소</button>
           <button type="button" id="btn-photo"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg> 사진 첨부</button>
           <input type="file" id="photo-input" accept="image/*" multiple hidden>
         </div>
@@ -191,6 +203,8 @@
       <div class="field" id="html-field" hidden>
         <label for="html-source">HTML 소스 (붙여넣기 가능)</label>
         <textarea id="html-source" rows="16" placeholder="&lt;p&gt;HTML 코드를 직접 붙여넣으세요&lt;/p&gt;"></textarea>
+        <button type="button" id="btn-html-preview" class="btn-attach">미리보기 켜기</button>
+        <div id="html-preview" class="html-preview post-content" hidden></div>
       </div>
       <div class="form-actions">
         <button type="submit" class="btn-primary">발행</button>
@@ -205,6 +219,20 @@
     <h2 class="section-title">화면 설정</h2>
     <p class="settings-note">홈 화면의 사진과 등장 효과를 변경합니다. 저장하면 바로 반영됩니다.</p>
     <div id="slot-list"></div>
+
+    <h2 class="section-title settings-sub">홈 화면 구성</h2>
+    <p class="settings-note">홈 화면을 블록으로 직접 조립합니다. 사진 무제한, 글씨 수정, 블록마다 등장 효과·속도 선택.</p>
+    <button type="button" id="btn-edit-home" class="btn-attach">홈 화면 편집</button>
+    <button type="button" id="btn-reset-home" class="btn-attach">기본 홈으로 되돌리기</button>
+
+    <h2 class="section-title settings-sub">사이트 전역 효과</h2>
+    <p class="settings-note">사이트 전체에 적용되는 인터랙션입니다.</p>
+    <div id="site-fx-list">
+      <label class="fx-toggle"><input type="checkbox" data-fx="hover"> 호버 스케일 — 마우스 올리면 사진이 살짝 커짐</label>
+      <label class="fx-toggle"><input type="checkbox" data-fx="parallax"> 패럴랙스 — 스크롤 시 배경 사진이 느리게 움직여 깊이감</label>
+      <label class="fx-toggle"><input type="checkbox" data-fx="smooth"> 스무스 스크롤 — 페이지 내 이동이 부드럽게</label>
+      <label class="fx-toggle"><input type="checkbox" data-fx="progress"> 프로그레스 바 — 화면 상단에 읽은 위치 게이지</label>
+    </div>
 
     <h2 class="section-title settings-sub">페이지 관리</h2>
     <p class="settings-note">자유 페이지를 만들어 홈 화면에 노출합니다. 개수 제한이 없습니다.</p>
@@ -238,6 +266,7 @@
       <button type="button" class="btn-attach" data-add="intro">소개 문단</button>
       <button type="button" class="btn-attach" data-add="split">이미지 + 글</button>
       <button type="button" class="btn-attach" data-add="banner">인용 배너</button>
+      <button type="button" class="btn-attach" data-add="photo">사진</button>
     </div>
     <div class="form-actions">
       <button type="button" id="btn-save-build" class="btn-primary">저장</button>

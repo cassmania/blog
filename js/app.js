@@ -363,10 +363,18 @@ function applySiteImages(saved) {
 async function pageHome() {
   render('tpl-home');
   try {
-    const [posts, images, pages] = await Promise.all([
-      db.getPosts(), db.getSetting('site_images'), db.getPages(),
+    const [posts, images, pages, home] = await Promise.all([
+      db.getPosts(), db.getSetting('site_images'), db.getPages(), db.getSetting('home_blocks'),
     ]);
-    applySiteImages(images);
+    if (Array.isArray(home.blocks) && home.blocks.length) {
+      // 관리자가 조립한 홈: 기본 디자인 섹션을 블록으로 교체 (최근 글·페이지 목록은 유지)
+      app.querySelectorAll('.hero-full, .intro-split, .alt-row, .interstitial, .pillar-strip')
+        .forEach((el) => el.remove());
+      $('#custom-pages-section').insertAdjacentHTML('beforebegin', blocksHtml(home.blocks));
+      applyBlockFx();
+    } else {
+      applySiteImages(images);
+    }
     const box = $('#recent-posts');
     if (!box) return; // 페이지 이동됨
     box.innerHTML = posts.length
@@ -532,6 +540,30 @@ async function pageWrite(editId, isPage = false) {
   $('#btn-image').addEventListener('click', () => {
     const url = prompt('이미지 URL을 입력하세요');
     if (url) { editor.focus(); document.execCommand('insertImage', false, url); }
+  });
+
+  // 글자색·크기 (선택한 부분에 적용)
+  $('#font-color').addEventListener('input', (e) => {
+    editor.focus();
+    document.execCommand('foreColor', false, e.target.value);
+  });
+  $('#font-size').addEventListener('change', (e) => {
+    if (!e.target.value) return;
+    editor.focus();
+    document.execCommand('fontSize', false, e.target.value);
+    e.target.selectedIndex = 0;
+  });
+
+  // HTML 모드 실시간 미리보기
+  const pv = $('#html-preview');
+  const pvBtn = $('#btn-html-preview');
+  pvBtn.addEventListener('click', () => {
+    pv.hidden = !pv.hidden;
+    pvBtn.textContent = pv.hidden ? '미리보기 켜기' : '미리보기 끄기';
+    if (!pv.hidden) pv.innerHTML = htmlSrc.value; // 관리자 본인 HTML
+  });
+  htmlSrc.addEventListener('input', () => {
+    if (!pv.hidden) pv.innerHTML = htmlSrc.value;
   });
 
   // 에디터 붙여넣기: 이미지 URL이면 <img>로 자동 변환
@@ -763,12 +795,46 @@ async function drawComments(postId) {
 
 /* ===== 디자인 페이지 (블록 조립) ===== */
 const BLOCK_DEFAULTS = {
-  hero: { img: 'https://picsum.photos/seed/build-hero/1920/900', eyebrow: 'A PERSONAL ARCHIVE', title: '제목을 입력하세요', btnText: '', btnLink: '' },
-  intro: { label: 'THE ARCHIVE', text: '소개 문단을 입력하세요.' },
-  split: { img: 'https://picsum.photos/seed/build-split/1000/750', num: '01 — 소제목', title: '제목을 입력하세요', body: '내용을 입력하세요.', reverse: false },
-  banner: { img: 'https://picsum.photos/seed/build-band/1920/700', quote: '인용구를 입력하세요.' },
+  hero: { img: 'https://picsum.photos/seed/build-hero/1920/900', eyebrow: 'A PERSONAL ARCHIVE', title: '제목을 입력하세요', btnText: '', btnLink: '', fx: 'fade', speed: 'normal' },
+  intro: { label: 'THE ARCHIVE', text: '소개 문단을 입력하세요.', fx: 'fade', speed: 'normal' },
+  split: { img: 'https://picsum.photos/seed/build-split/1000/750', num: '01 — 소제목', title: '제목을 입력하세요', body: '내용을 입력하세요.', reverse: false, fx: 'rise', speed: 'normal' },
+  banner: { img: 'https://picsum.photos/seed/build-band/1920/700', quote: '인용구를 입력하세요.', fx: 'fade', speed: 'normal' },
+  photo: { img: 'https://picsum.photos/seed/build-photo/1600/900', caption: '', fx: 'fade', speed: 'normal' },
 };
-const BLOCK_NAMES = { hero: '히어로', intro: '소개 문단', split: '이미지 + 글', banner: '인용 배너' };
+const BLOCK_NAMES = { hero: '히어로', intro: '소개 문단', split: '이미지 + 글', banner: '인용 배너', photo: '사진' };
+
+/* 블록 등장 효과 + 속도 */
+const BLOCK_FX = [
+  { key: 'none', label: '없음' },
+  { key: 'fade', label: '페이드' },
+  { key: 'rise', label: '슬라이드 ↑ (아래에서)' },
+  { key: 'down', label: '슬라이드 ↓ (위에서)' },
+  { key: 'left', label: '슬라이드 → (왼쪽에서)' },
+  { key: 'right', label: '슬라이드 ← (오른쪽에서)' },
+  { key: 'pop', label: '팝 (뿅 커짐)' },
+  { key: 'zoom', label: '줌 (살짝 커짐)' },
+  { key: 'flip', label: '플립 (기울며)' },
+  { key: 'rotate', label: '로테이트 (회전하며)' },
+  { key: 'blur', label: '블러 (흐림에서 선명)' },
+];
+const BLOCK_SPEEDS = [
+  { key: 'slow', label: '느리게', dur: '1.2s' },
+  { key: 'normal', label: '보통', dur: '0.65s' },
+  { key: 'fast', label: '빠르게', dur: '0.35s' },
+];
+const speedDur = (k) => (BLOCK_SPEEDS.find((s) => s.key === k) || BLOCK_SPEEDS[1]).dur;
+
+/* 렌더된 블록에 선택한 효과 적용 */
+function applyBlockFx(root = app) {
+  root.querySelectorAll('[data-fx]').forEach((el) => {
+    el.classList.add('no-reveal'); // 기본 리빌 대신 블록 자체 효과
+    const fx = el.dataset.fx;
+    if (fx === 'none' || reduceMotion.matches) return;
+    el.classList.add('fxi', 'fxi-' + fx);
+    el.style.setProperty('--fx-dur', el.dataset.dur || '0.65s');
+    safeObserve(el);
+  });
+}
 
 function parseBuilderContent(content) {
   try {
@@ -781,9 +847,10 @@ function parseBuilderContent(content) {
 /* 블록 배열 → 메인 화면과 동일한 마크업 */
 function blocksHtml(blocks) {
   return blocks.map((b) => {
+    const fxAttr = `data-fx="${escapeHtml(b.fx || 'none')}" data-dur="${speedDur(b.speed)}"`;
     if (b.type === 'hero') {
       const btn = b.btnText ? `<a href="${escapeHtml(b.btnLink || '#')}" class="btn-pill">${escapeHtml(b.btnText)}</a>` : '';
-      return `<section class="hero-full">
+      return `<section class="hero-full" ${fxAttr}>
         <img src="${escapeHtml(b.img)}" alt="" loading="eager">
         <div class="hero-overlay">
           ${b.eyebrow ? `<p class="hero-eyebrow">${escapeHtml(b.eyebrow)}</p>` : ''}
@@ -793,13 +860,13 @@ function blocksHtml(blocks) {
       </section>`;
     }
     if (b.type === 'intro') {
-      return `<section class="intro-split">
+      return `<section class="intro-split" ${fxAttr}>
         <span class="intro-label">${escapeHtml(b.label)}</span>
         <p class="intro-text">${escapeHtml(b.text)}</p>
       </section>`;
     }
     if (b.type === 'split') {
-      return `<section class="alt-row ${b.reverse ? 'alt-reverse' : ''}">
+      return `<section class="alt-row ${b.reverse ? 'alt-reverse' : ''}" ${fxAttr}>
         <div class="alt-media"><img src="${escapeHtml(b.img)}" alt="" loading="lazy"></div>
         <div class="alt-body">
           ${b.num ? `<span class="feature-num">${escapeHtml(b.num)}</span>` : ''}
@@ -809,33 +876,50 @@ function blocksHtml(blocks) {
       </section>`;
     }
     if (b.type === 'banner') {
-      return `<section class="interstitial">
+      return `<section class="interstitial" ${fxAttr}>
         <img src="${escapeHtml(b.img)}" alt="" loading="lazy">
         <p class="interstitial-quote">${escapeHtml(b.quote)}</p>
+      </section>`;
+    }
+    if (b.type === 'photo') {
+      return `<section class="photo-block" ${fxAttr}>
+        <img src="${escapeHtml(b.img)}" alt="" loading="lazy">
+        ${b.caption ? `<p class="photo-caption">${escapeHtml(b.caption)}</p>` : ''}
       </section>`;
     }
     return '';
   }).join('');
 }
 
-/* ===== 페이지: 디자인 페이지 빌더 (관리자) ===== */
-async function pageBuild(editId) {
+/* ===== 페이지: 디자인 페이지 빌더 (관리자) — isHome=true면 홈 화면 편집 ===== */
+async function pageBuild(editId, isHome = false) {
   if (!admin.isLoggedIn()) {
     const ok = await admin.login();
     applyAdminUI();
-    if (ok) pageBuild(editId);
+    if (ok) pageBuild(editId, isHome);
     else location.hash = '#/';
     return;
   }
   render('tpl-pagebuild');
   let editing = null;
-  if (editId) {
-    try { editing = await db.getPage(editId); } catch (e) { dbError(e); return; }
-    if (!editing) { location.hash = '#/settings'; return; }
-    $('#build-title').textContent = '디자인 페이지 수정';
-    $('#build-page-title').value = editing.title;
+  let blocks;
+  if (isHome) {
+    $('#build-title').textContent = '홈 화면 편집';
+    $('#build-page-title').closest('.field').hidden = true;
+    let saved;
+    try { saved = await db.getSetting('home_blocks'); } catch (e) { dbError(e); return; }
+    blocks = Array.isArray(saved.blocks) && saved.blocks.length
+      ? saved.blocks
+      : [{ type: 'hero', ...BLOCK_DEFAULTS.hero }];
+  } else {
+    if (editId) {
+      try { editing = await db.getPage(editId); } catch (e) { dbError(e); return; }
+      if (!editing) { location.hash = '#/settings'; return; }
+      $('#build-title').textContent = '디자인 페이지 수정';
+      $('#build-page-title').value = editing.title;
+    }
+    blocks = editing ? (parseBuilderContent(editing.content) || []) : [{ type: 'hero', ...BLOCK_DEFAULTS.hero }];
   }
-  const blocks = editing ? (parseBuilderContent(editing.content) || []) : [{ type: 'hero', ...BLOCK_DEFAULTS.hero }];
 
   const fieldHtml = (b, i) => {
     if (b.type === 'hero') {
@@ -862,8 +946,23 @@ async function pageBuild(editId) {
       return `<div class="field"><label>배경 사진</label>${imgField(b.img)}</div>
         <div class="field"><label>인용구</label><textarea data-k="quote" rows="2">${escapeHtml(b.quote)}</textarea></div>`;
     }
+    if (b.type === 'photo') {
+      return `<div class="field"><label>사진</label>${imgField(b.img)}</div>
+        <div class="field"><label>설명 문구 (선택)</label><input data-k="caption" value="${escapeHtml(b.caption)}"></div>`;
+    }
     return '';
   };
+  // 모든 블록 공통: 등장 효과 + 속도
+  const fxFields = (b) => `<div class="slot-row block-fx-row">
+      <label class="tool-label">등장 효과
+        <select class="slot-fx" data-k="fx">${BLOCK_FX.map((f) =>
+          `<option value="${f.key}" ${(b.fx || 'none') === f.key ? 'selected' : ''}>${f.label}</option>`).join('')}</select>
+      </label>
+      <label class="tool-label">속도
+        <select class="slot-fx" data-k="speed">${BLOCK_SPEEDS.map((s) =>
+          `<option value="${s.key}" ${(b.speed || 'normal') === s.key ? 'selected' : ''}>${s.label}</option>`).join('')}</select>
+      </label>
+    </div>`;
   const imgField = (src) => `<div class="build-img-row">
       <img class="build-img-preview" src="${escapeHtml(src)}" alt="">
       <input data-k="img" value="${escapeHtml(src)}" placeholder="이미지 URL">
@@ -883,6 +982,7 @@ async function pageBuild(editId) {
           </span>
         </div>
         ${fieldHtml(b, i)}
+        ${fxFields(b)}
       </div>`).join('');
   };
   drawBlocks();
@@ -925,9 +1025,16 @@ async function pageBuild(editId) {
   });
 
   $('#btn-save-build').addEventListener('click', async () => {
+    if (!blocks.length) { alert('블록을 하나 이상 추가하세요.'); return; }
+    if (isHome) {
+      try {
+        await db.setSetting('home_blocks', { blocks });
+        location.hash = '#/';
+      } catch (e) { dbError(e); }
+      return;
+    }
     const title = $('#build-page-title').value.trim();
     if (!title) { alert('페이지 제목을 입력하세요.'); return; }
-    if (!blocks.length) { alert('블록을 하나 이상 추가하세요.'); return; }
     const payload = { title, content: JSON.stringify({ blocks }) };
     try {
       if (editing) {
@@ -961,6 +1068,7 @@ async function pageView(id) {
       try { await db.deletePage(id); } catch (e2) { dbError(e2); return; }
       location.hash = '#/';
     });
+    applyBlockFx();
     initReveal();
     return;
   }
@@ -986,13 +1094,25 @@ async function pageView(id) {
 async function pageSettings() {
   if (!admin.isLoggedIn()) { location.hash = '#/'; return; }
   render('tpl-settings');
-  let saved, savedFx, boardNames, posts, pages;
+  let saved, savedFx, boardNames, posts, pages, siteFx;
   try {
-    [saved, savedFx, boardNames, posts, pages] = await Promise.all([
+    [saved, savedFx, boardNames, posts, pages, siteFx] = await Promise.all([
       db.getSetting('site_images'), db.getSetting('board_fx'), db.getBoards(), db.getPosts(), db.getPages(),
+      db.getSetting('site_fx'),
     ]);
   } catch (e) { dbError(e); return; }
   if (!$('#slot-list')) return;
+
+  // 홈 화면 편집 + 사이트 전역 효과
+  $('#btn-edit-home').addEventListener('click', () => { location.hash = '#/homebuild'; });
+  $('#btn-reset-home').addEventListener('click', async () => {
+    if (!confirm('홈 화면을 기본 디자인으로 되돌릴까요? (조립한 블록 삭제)')) return;
+    try { await db.setSetting('home_blocks', {}); } catch (e) { dbError(e); return; }
+    alert('기본 홈으로 되돌렸습니다.');
+  });
+  document.querySelectorAll('#site-fx-list input[data-fx]').forEach((cb) => {
+    cb.checked = !!siteFx[cb.dataset.fx];
+  });
 
   // 페이지 관리
   $('#page-manage-list').innerHTML = pages.length
@@ -1108,9 +1228,15 @@ async function pageSettings() {
     });
     const fxOut = {};
     Object.entries(draftFx).forEach(([b, f]) => { if (f !== 'rise') fxOut[b] = f; });
+    const newSiteFx = {};
+    document.querySelectorAll('#site-fx-list input[data-fx]').forEach((cb) => {
+      if (cb.checked) newSiteFx[cb.dataset.fx] = true;
+    });
     try {
       await db.setSetting('site_images', out);
       await db.setSetting('board_fx', fxOut);
+      await db.setSetting('site_fx', newSiteFx);
+      applySiteFx(newSiteFx);
       alert('저장했습니다.');
       location.hash = '#/';
     } catch (e) { dbError(e); }
@@ -1125,6 +1251,37 @@ async function pageSettings() {
     location.hash = '#/';
   });
 }
+
+/* ===== 사이트 전역 효과 (호버·패럴랙스·스무스·프로그레스) ===== */
+function applySiteFx(conf) {
+  document.documentElement.classList.toggle('fx-smooth', !!conf.smooth);
+  document.body.classList.toggle('fx-hover', !!conf.hover);
+  document.body.classList.toggle('fx-parallax', !!conf.parallax);
+  document.body.classList.toggle('fx-progress', !!conf.progress);
+}
+
+let fxTicking = false;
+window.addEventListener('scroll', () => {
+  if (fxTicking) return;
+  fxTicking = true;
+  requestAnimationFrame(() => {
+    fxTicking = false;
+    const body = document.body;
+    if (body.classList.contains('fx-progress')) {
+      const h = document.documentElement;
+      const p = h.scrollTop / Math.max(1, h.scrollHeight - h.clientHeight);
+      $('#scroll-progress').style.width = (p * 100).toFixed(2) + '%';
+    }
+    if (body.classList.contains('fx-parallax') && !reduceMotion.matches) {
+      document.querySelectorAll('.hero-full > img, .interstitial > img').forEach((img) => {
+        const r = img.parentElement.getBoundingClientRect();
+        if (r.bottom > 0 && r.top < innerHeight) {
+          img.style.transform = `translateY(${(r.top * -0.12).toFixed(1)}px) scale(1.15)`;
+        }
+      });
+    }
+  });
+}, { passive: true });
 
 /* ===== 라우터 ===== */
 function route() {
@@ -1146,6 +1303,8 @@ function route() {
     pageWrite(parts[1] || null, true);
   } else if (parts[0] === 'pagebuild') {
     pageBuild(parts[1] || null);
+  } else if (parts[0] === 'homebuild') {
+    pageBuild(null, true);
   } else if (parts[0] === 'settings') {
     $('[data-nav="settings"]')?.classList.add('active');
     pageSettings();
@@ -1168,9 +1327,10 @@ $('#btn-admin').addEventListener('click', async (e) => {
   route();
 });
 
-/* 부팅: 세션 복원 후 첫 라우트 */
+/* 부팅: 세션 복원 + 전역 효과 적용 후 첫 라우트 */
 showLoading();
 sb.auth.getSession().then(({ data }) => {
   adminOn = !!data.session;
   route();
 });
+db.getSetting('site_fx').then(applySiteFx).catch(() => { /* 효과 미설정 */ });
