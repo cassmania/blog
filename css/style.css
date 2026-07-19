@@ -38,10 +38,25 @@ button, [role="button"], a { cursor: pointer; }
   to { transform: scale(1.12); }
 }
 
+/* 게시판 글 목록 등장 효과 (게시판마다 선택) */
+#app .fxi {
+  opacity: 0;
+  transition: opacity 0.5s ease, transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), filter 0.5s ease;
+  transition-delay: var(--fxi-delay, 0ms);
+}
+.fxi-rise { transform: translateY(26px); }
+.fxi-left { transform: translateX(-40px); }
+.fxi-right { transform: translateX(40px); }
+.fxi-zoom { transform: scale(0.92); }
+.fxi-flip { transform: perspective(800px) rotateX(14deg) translateY(18px); transform-origin: top center; }
+.fxi-blur { filter: blur(10px); }
+#app .fxi.in-view { opacity: 1; transform: none; filter: none; }
+
 @media (prefers-reduced-motion: reduce) {
   .reveal { opacity: 1; transform: none; }
   .fx { opacity: 1; transform: none; }
   .fx-kenburns { animation: none; }
+  #app .fxi { opacity: 1; transform: none; filter: none; }
   * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
 
@@ -265,6 +280,31 @@ main { max-width: var(--container); margin: 0 auto; padding: 0 24px 120px; }
   font-family: var(--sans);
   font-size: 0.88rem;
 }
+
+.settings-sub { margin-top: 48px; }
+.fx-row {
+  display: grid;
+  grid-template-columns: 140px auto auto 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+.fx-board-name { font-weight: 500; font-size: 0.92rem; }
+.fx-sample {
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 9px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  min-width: 120px;
+}
+.fx-sample-bar { display: block; width: 60%; height: 8px; border-radius: 4px; background: var(--line-strong); }
+.fx-sample-line { display: block; width: 90%; height: 5px; border-radius: 3px; background: var(--line); }
 
 /* ===== Feature section ===== */
 .feature-section { padding: 70px 0 30px; }
@@ -801,6 +841,8 @@ main { max-width: var(--container); margin: 0 auto; padding: 0 24px 120px; }
   .alt-reverse .alt-body { order: 2; }
   .pillar-strip { grid-template-columns: 1fr; padding: 56px 0 20px; gap: 24px; }
   .slot-card { grid-template-columns: 1fr; gap: 14px; }
+  .fx-row { grid-template-columns: 1fr 1fr; }
+  .fx-sample { grid-column: 1 / -1; }
 .post-view { padding-top: 36px; }
   .post-meta { flex-wrap: wrap; gap: 8px; }
   .comment-form-left { gap: 10px; flex-wrap: wrap; }

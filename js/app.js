@@ -11,7 +11,21 @@ const store = {
   setComments: (postId, c) => localStorage.setItem('blog_comments_' + postId, JSON.stringify(c)),
   getSiteImages: () => JSON.parse(localStorage.getItem('blog_site_images') || '{}'),
   setSiteImages: (v) => localStorage.setItem('blog_site_images', JSON.stringify(v)),
+  getBoardFx: () => JSON.parse(localStorage.getItem('blog_board_fx') || '{}'),
+  setBoardFx: (v) => localStorage.setItem('blog_board_fx', JSON.stringify(v)),
 };
+
+/* 게시판 글 목록 등장 효과 */
+const BOARD_FX = [
+  { key: 'rise', label: '올라오기 (기본)' },
+  { key: 'fade', label: '페이드' },
+  { key: 'left', label: '왼쪽에서 슬라이드' },
+  { key: 'right', label: '오른쪽에서 슬라이드' },
+  { key: 'zoom', label: '줌 (작게서 커짐)' },
+  { key: 'flip', label: '플립 (기울며 등장)' },
+  { key: 'blur', label: '블러 (흐림에서 선명)' },
+  { key: 'none', label: '없음' },
+];
 
 /* 홈 화면 이미지 슬롯: 기본값 + 효과 목록 */
 const IMAGE_SLOTS = [
@@ -174,13 +188,23 @@ const revealObserver = new IntersectionObserver((entries) => {
   });
 }, { threshold: 0.12 });
 
+/* 관찰 + 안전장치: 이미 화면 안이면 타이머로도 in-view 부여 (IO 미발화 환경 대비) */
+function safeObserve(el) {
+  revealObserver.observe(el);
+  const r = el.getBoundingClientRect();
+  if (r.top < innerHeight && r.bottom > 0) {
+    setTimeout(() => el.classList.add('in-view'), 400);
+  }
+}
+
 function initReveal() {
   if (reduceMotion.matches) return;
   app.querySelectorAll('.post-card, .post-item, .alt-row, .pillar, .interstitial, .intro-split')
     .forEach((el, i) => {
+      if (el.classList.contains('no-reveal')) return; // 게시판별 효과가 이미 적용됨
       el.classList.add('reveal');
       el.style.setProperty('--reveal-delay', `${Math.min(i % 6, 4) * 70}ms`);
-      revealObserver.observe(el);
+      safeObserve(el);
     });
 }
 
@@ -220,7 +244,7 @@ function applySiteImages() {
       img.classList.add('fx-kenburns');
     } else {
       img.classList.add('fx', 'fx-' + fx);
-      revealObserver.observe(img);
+      safeObserve(img);
     }
   });
 }
@@ -293,6 +317,17 @@ function pageBoard(category) {
     $('#board-posts').innerHTML = list.length
       ? list.map(postItemHtml).join('')
       : '<p class="empty-msg">글이 없습니다.</p>';
+    // 게시판별 등장 효과: 저장된 효과가 있으면 기본 리빌 대신 적용
+    const fx = store.getBoardFx()[category || '전체'] || 'rise';
+    if (fx !== 'rise' && !reduceMotion.matches) {
+      $('#board-posts').querySelectorAll('.post-item').forEach((el, i) => {
+        el.classList.add('no-reveal'); // 기본 리빌 대신 게시판 효과 사용
+        if (fx === 'none') return;
+        el.classList.add('fxi', 'fxi-' + fx);
+        el.style.setProperty('--fxi-delay', `${Math.min(i, 6) * 70}ms`);
+        safeObserve(el);
+      });
+    }
     initReveal();
   };
   draw('');
@@ -647,14 +682,52 @@ function pageSettings() {
     }
   });
 
+  // 게시판별 등장 효과
+  const savedFx = store.getBoardFx();
+  const postCats = [...new Set(store.getPosts().map((p) => p.category || '미분류'))];
+  const fxBoards = ['전체', ...new Set([...store.getBoards(), ...postCats])];
+  const draftFx = {};
+  fxBoards.forEach((b) => { draftFx[b] = savedFx[b] || 'rise'; });
+
+  $('#board-fx-list').innerHTML = fxBoards.map((b) => {
+    const options = BOARD_FX.map((f) =>
+      `<option value="${f.key}" ${draftFx[b] === f.key ? 'selected' : ''}>${f.label}</option>`).join('');
+    return `<div class="fx-row" data-board="${escapeHtml(b)}">
+      <span class="fx-board-name">${escapeHtml(b)}</span>
+      <select class="slot-fx board-fx-sel">${options}</select>
+      <button type="button" class="btn-attach btn-fx-preview">미리보기</button>
+      <div class="fx-sample"><span class="fx-sample-bar"></span><span class="fx-sample-line"></span></div>
+    </div>`;
+  }).join('');
+
+  $('#board-fx-list').addEventListener('change', (e) => {
+    if (!e.target.classList.contains('board-fx-sel')) return;
+    draftFx[e.target.closest('.fx-row').dataset.board] = e.target.value;
+  });
+  $('#board-fx-list').addEventListener('click', (e) => {
+    if (!e.target.closest('.btn-fx-preview')) return;
+    const row = e.target.closest('.fx-row');
+    const fx = row.querySelector('.board-fx-sel').value;
+    const sample = row.querySelector('.fx-sample');
+    sample.className = 'fx-sample';
+    void sample.offsetWidth; // 리플로 강제 — 애니메이션 재시작
+    if (fx === 'none') return;
+    const cls = fx === 'rise' ? 'fxi-rise' : 'fxi-' + fx;
+    sample.classList.add('fxi', cls);
+    requestAnimationFrame(() => requestAnimationFrame(() => sample.classList.add('in-view')));
+  });
+
   $('#btn-save-settings').addEventListener('click', () => {
     const out = {};
     IMAGE_SLOTS.forEach((s) => {
       const d = draft[s.key];
       if (d.src || d.fx !== 'none') out[s.key] = d;
     });
+    const fxOut = {};
+    Object.entries(draftFx).forEach(([b, f]) => { if (f !== 'rise') fxOut[b] = f; });
     try {
       store.setSiteImages(out);
+      store.setBoardFx(fxOut);
       alert('저장했습니다.');
       location.hash = '#/';
     } catch {
@@ -664,6 +737,7 @@ function pageSettings() {
   $('#btn-reset-settings').addEventListener('click', () => {
     if (!confirm('모든 사진과 효과를 기본값으로 되돌릴까요?')) return;
     localStorage.removeItem('blog_site_images');
+    localStorage.removeItem('blog_board_fx');
     alert('기본값으로 되돌렸습니다.');
     location.hash = '#/';
   });
