@@ -1,19 +1,126 @@
-/* 丕刀卜己卜人丨廿卜 blog — GitHub Pages 정적 블로그
-   저장소: localStorage (브라우저별). 비밀댓글: Web Crypto AES-GCM 암호화.
-   관리자: 글쓰기·수정·삭제, 게시판 관리, 댓글 승인/삭제. */
+/* 丕刀卜己卜人丨廿卜 blog — GitHub Pages 정적 블로그 + Supabase 백엔드
+   글·댓글·게시판·설정 전부 Supabase DB 저장 — 모든 방문자가 같은 내용을 봄.
+   비밀댓글: Web Crypto AES-GCM 암호화. 관리자: Supabase Auth 이메일 로그인. */
 
-const store = {
-  getPosts: () => JSON.parse(localStorage.getItem('blog_posts') || '[]'),
-  setPosts: (p) => localStorage.setItem('blog_posts', JSON.stringify(p)),
-  getBoards: () => JSON.parse(localStorage.getItem('blog_boards') || '[]'),
-  setBoards: (b) => localStorage.setItem('blog_boards', JSON.stringify(b)),
-  getComments: (postId) => JSON.parse(localStorage.getItem('blog_comments_' + postId) || '[]'),
-  setComments: (postId, c) => localStorage.setItem('blog_comments_' + postId, JSON.stringify(c)),
-  getSiteImages: () => JSON.parse(localStorage.getItem('blog_site_images') || '{}'),
-  setSiteImages: (v) => localStorage.setItem('blog_site_images', JSON.stringify(v)),
-  getBoardFx: () => JSON.parse(localStorage.getItem('blog_board_fx') || '{}'),
-  setBoardFx: (v) => localStorage.setItem('blog_board_fx', JSON.stringify(v)),
+const SUPABASE_URL = 'https://uarrnlbgowejwulzixqm.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_dsijIbtDJOt8LFGS90lMuA_d_OEHVuO';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+/* ===== DB 계층 ===== */
+const mapPost = (r) => ({ id: r.id, title: r.title, category: r.category, content: r.content, createdAt: r.created_at });
+const mapComment = (r) => ({
+  id: r.id, name: r.name, body: r.body, photo: r.photo, encrypted: r.encrypted,
+  secret: r.secret, approved: r.approved, spam: r.spam, pwHash: r.pw_hash, createdAt: r.created_at,
+});
+
+const db = {
+  async getPosts() {
+    const { data, error } = await sb.from('posts').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    return data.map(mapPost);
+  },
+  async getPost(id) {
+    const { data, error } = await sb.from('posts').select('*').eq('id', id).maybeSingle();
+    if (error) throw error;
+    return data ? mapPost(data) : null;
+  },
+  async createPost(p) {
+    const { data, error } = await sb.from('posts')
+      .insert({ title: p.title, category: p.category, content: p.content }).select('id').single();
+    if (error) throw error;
+    return data.id;
+  },
+  async updatePost(id, p) {
+    const { error } = await sb.from('posts')
+      .update({ title: p.title, category: p.category, content: p.content, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) throw error;
+  },
+  async deletePost(id) {
+    const { error } = await sb.from('posts').delete().eq('id', id);
+    if (error) throw error;
+  },
+  async getBoards() {
+    const { data, error } = await sb.from('boards').select('name').order('created_at');
+    if (error) throw error;
+    return data.map((r) => r.name);
+  },
+  async addBoard(name) {
+    const { error } = await sb.from('boards').insert({ name });
+    if (error) throw error;
+  },
+  async deleteBoard(name) {
+    const { error: e1 } = await sb.from('posts').update({ category: '' }).eq('category', name);
+    if (e1) throw e1;
+    const { error: e2 } = await sb.from('boards').delete().eq('name', name);
+    if (e2) throw e2;
+  },
+  async getComments(postId) {
+    const { data, error } = await sb.from('comments').select('*')
+      .eq('post_id', postId).order('created_at');
+    if (error) throw error;
+    return data.map(mapComment);
+  },
+  async addComment(postId, c) {
+    const { error } = await sb.from('comments').insert({
+      post_id: postId, name: c.name, body: c.body ?? null, photo: c.photo ?? null,
+      encrypted: c.encrypted ?? null, secret: c.secret, spam: c.spam, pw_hash: c.pwHash,
+    });
+    if (error) throw error;
+  },
+  async approveComment(id) {
+    const { error } = await sb.from('comments').update({ approved: true, spam: false }).eq('id', id);
+    if (error) throw error;
+  },
+  async deleteCommentAdmin(id) {
+    const { error } = await sb.from('comments').delete().eq('id', id);
+    if (error) throw error;
+  },
+  async deleteCommentWithPw(id, pwHash) {
+    const { data, error } = await sb.rpc('delete_comment_with_pw', { cid: id, pw: pwHash });
+    if (error) throw error;
+    return data === true;
+  },
+  async getPages() {
+    const { data, error } = await sb.from('custom_pages').select('id,title,created_at').order('sort').order('created_at');
+    if (error) throw error;
+    return data.map((r) => ({ id: r.id, title: r.title, createdAt: r.created_at }));
+  },
+  async getPage(id) {
+    const { data, error } = await sb.from('custom_pages').select('*').eq('id', id).maybeSingle();
+    if (error) throw error;
+    return data ? { id: data.id, title: data.title, content: data.content, createdAt: data.created_at } : null;
+  },
+  async createPage(p) {
+    const { data, error } = await sb.from('custom_pages')
+      .insert({ title: p.title, content: p.content }).select('id').single();
+    if (error) throw error;
+    return data.id;
+  },
+  async updatePage(id, p) {
+    const { error } = await sb.from('custom_pages')
+      .update({ title: p.title, content: p.content, updated_at: new Date().toISOString() }).eq('id', id);
+    if (error) throw error;
+  },
+  async deletePage(id) {
+    const { error } = await sb.from('custom_pages').delete().eq('id', id);
+    if (error) throw error;
+  },
+  async getSetting(key) {
+    const { data, error } = await sb.from('settings').select('value').eq('key', key).maybeSingle();
+    if (error) throw error;
+    return data ? data.value : {};
+  },
+  async setSetting(key, value) {
+    const { error } = await sb.from('settings').upsert({ key, value });
+    if (error) throw error;
+  },
 };
+
+function dbError(e) {
+  console.error(e);
+  alert('서버 통신에 실패했습니다. 잠시 후 다시 시도하세요.\n' + (e?.message || ''));
+}
 
 /* 게시판 글 목록 등장 효과 */
 const BOARD_FX = [
@@ -79,38 +186,38 @@ async function sha256(text) {
   return b64.from(buf);
 }
 
-/* ===== 관리자 ===== */
+/* ===== 관리자 (Supabase Auth) ===== */
+let adminOn = false;
+
 const admin = {
-  isSet: () => !!localStorage.getItem('blog_admin_hash'),
-  isLoggedIn: () => sessionStorage.getItem('blog_admin') === '1',
-  async setup() {
-    const pw = prompt('관리자 비밀번호를 설정하세요 (최초 1회)');
-    if (!pw || pw.length < 4) { if (pw !== null) alert('4자 이상 입력하세요.'); return false; }
-    const pw2 = prompt('비밀번호를 한 번 더 입력하세요');
-    if (pw !== pw2) { alert('비밀번호가 일치하지 않습니다.'); return false; }
-    localStorage.setItem('blog_admin_hash', await sha256(pw));
-    sessionStorage.setItem('blog_admin', '1');
-    return true;
-  },
+  isLoggedIn: () => adminOn,
   async login() {
-    if (!this.isSet()) return this.setup();
-    const pw = prompt('관리자 비밀번호를 입력하세요');
+    const savedEmail = localStorage.getItem('blog_admin_email') || '';
+    const email = prompt('관리자 이메일을 입력하세요', savedEmail);
+    if (!email) return false;
+    const pw = prompt('비밀번호를 입력하세요');
     if (pw === null) return false;
-    if (await sha256(pw) !== localStorage.getItem('blog_admin_hash')) {
-      alert('비밀번호가 일치하지 않습니다.');
-      return false;
-    }
-    sessionStorage.setItem('blog_admin', '1');
+    const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password: pw });
+    if (error) { alert('로그인 실패: 이메일 또는 비밀번호를 확인하세요.'); return false; }
+    localStorage.setItem('blog_admin_email', email.trim());
+    adminOn = true;
     return true;
   },
-  logout() { sessionStorage.removeItem('blog_admin'); },
+  async logout() {
+    await sb.auth.signOut();
+    adminOn = false;
+  },
 };
 
+sb.auth.onAuthStateChange((_event, session) => {
+  adminOn = !!session;
+  applyAdminUI();
+});
+
 function applyAdminUI() {
-  const on = admin.isLoggedIn();
-  document.querySelectorAll('.admin-only').forEach((el) => { el.hidden = !on; });
+  document.querySelectorAll('.admin-only').forEach((el) => { el.hidden = !adminOn; });
   const link = $('#btn-admin');
-  if (link) link.textContent = on ? '로그아웃' : '관리자';
+  if (link) link.textContent = adminOn ? '로그아웃' : '관리자';
 }
 
 /* ===== 스팸 필터 (댓글) ===== */
@@ -128,7 +235,7 @@ const app = $('#app');
 
 function escapeHtml(s) {
   const d = document.createElement('div');
-  d.textContent = s;
+  d.textContent = s ?? '';
   return d.innerHTML;
 }
 
@@ -175,6 +282,10 @@ function render(tplId) {
   app.innerHTML = '';
   app.appendChild($('#' + tplId).content.cloneNode(true));
   applyAdminUI();
+}
+
+function showLoading() {
+  app.innerHTML = '<p class="empty-msg loading-msg">불러오는 중…</p>';
 }
 
 /* 스크롤 리빌 (prefers-reduced-motion 존중) */
@@ -231,8 +342,7 @@ function postCardHtml(p) {
 }
 
 /* 저장된 이미지·효과를 홈 화면에 적용 */
-function applySiteImages() {
-  const saved = store.getSiteImages();
+function applySiteImages(saved) {
   IMAGE_SLOTS.forEach((slot) => {
     const img = app.querySelector(`[data-slot="${slot.key}"]`);
     if (!img) return;
@@ -250,29 +360,45 @@ function applySiteImages() {
 }
 
 /* ===== 페이지: 홈 ===== */
-function pageHome() {
+async function pageHome() {
   render('tpl-home');
-  applySiteImages();
-  const posts = store.getPosts().slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const box = $('#recent-posts');
-  box.innerHTML = posts.length
-    ? posts.slice(0, 5).map(postCardHtml).join('')
-    : '<p class="empty-msg">아직 글이 없습니다.</p>';
-  box.querySelector('.post-card')?.classList.add('is-featured');
-  initReveal();
+  try {
+    const [posts, images, pages] = await Promise.all([
+      db.getPosts(), db.getSetting('site_images'), db.getPages(),
+    ]);
+    applySiteImages(images);
+    const box = $('#recent-posts');
+    if (!box) return; // 페이지 이동됨
+    box.innerHTML = posts.length
+      ? posts.slice(0, 5).map(postCardHtml).join('')
+      : '<p class="empty-msg">아직 글이 없습니다.</p>';
+    box.querySelector('.post-card')?.classList.add('is-featured');
+    if (pages.length) {
+      $('#custom-pages-section').hidden = false;
+      $('#custom-pages').innerHTML = pages.map((p) =>
+        `<a class="page-card" href="#/page/${p.id}">${escapeHtml(p.title)}</a>`).join('');
+    }
+    initReveal();
+  } catch (e) { dbError(e); }
 }
 
 /* ===== 페이지: 게시판 ===== */
-function pageBoard(category) {
+async function pageBoard(category) {
   render('tpl-board');
-  const posts = store.getPosts().slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  let posts, boardNames, boardFx;
+  try {
+    [posts, boardNames, boardFx] = await Promise.all([
+      db.getPosts(), db.getBoards(), db.getSetting('board_fx'),
+    ]);
+  } catch (e) { dbError(e); return; }
+  if (!$('#category-list')) return; // 페이지 이동됨
 
   const counts = {};
   posts.forEach((p) => {
     const c = p.category || '미분류';
     counts[c] = (counts[c] || 0) + 1;
   });
-  const boards = [...new Set([...store.getBoards(), ...Object.keys(counts)])];
+  const boards = [...new Set([...boardNames, ...Object.keys(counts)])];
   const delBtn = (c) => admin.isLoggedIn()
     ? `<button type="button" class="btn-del-board" data-board="${escapeHtml(c)}" title="게시판 삭제">×</button>` : '';
   $('#category-list').innerHTML =
@@ -283,27 +409,26 @@ function pageBoard(category) {
 
   if (category) $('#board-title').textContent = category;
 
-  $('#btn-add-board').addEventListener('click', () => {
+  $('#btn-add-board').addEventListener('click', async () => {
     if (!admin.isLoggedIn()) return;
     const name = prompt('새 게시판 이름을 입력하세요');
     if (!name || !name.trim()) return;
     const trimmed = name.trim();
     if (boards.includes(trimmed)) { alert('이미 있는 게시판입니다.'); return; }
-    store.setBoards([...store.getBoards(), trimmed]);
+    try { await db.addBoard(trimmed); } catch (e) { dbError(e); return; }
     pageBoard(category);
   });
 
-  $('#category-list').addEventListener('click', (e) => {
+  $('#category-list').addEventListener('click', async (e) => {
     const btn = e.target.closest('.btn-del-board');
     if (!btn || !admin.isLoggedIn()) return;
+    e.preventDefault();
     const name = btn.dataset.board;
     const inUse = counts[name] || 0;
     if (inUse) {
       if (!confirm(`'${name}' 게시판에 글이 ${inUse}개 있습니다. 게시판을 삭제하면 글은 '미분류'로 이동합니다. 삭제할까요?`)) return;
-      posts.forEach((p) => { if ((p.category || '미분류') === name) p.category = ''; });
-      store.setPosts(posts);
     } else if (!confirm(`'${name}' 게시판을 삭제할까요?`)) return;
-    store.setBoards(store.getBoards().filter((b) => b !== name));
+    try { await db.deleteBoard(name); } catch (e2) { dbError(e2); return; }
     if (category === name) { location.hash = '#/board'; return; }
     pageBoard(category);
   });
@@ -318,7 +443,7 @@ function pageBoard(category) {
       ? list.map(postItemHtml).join('')
       : '<p class="empty-msg">글이 없습니다.</p>';
     // 게시판별 등장 효과: 저장된 효과가 있으면 기본 리빌 대신 적용
-    const fx = store.getBoardFx()[category || '전체'] || 'rise';
+    const fx = boardFx[category || '전체'] || 'rise';
     if (fx !== 'rise' && !reduceMotion.matches) {
       $('#board-posts').querySelectorAll('.post-item').forEach((el, i) => {
         el.classList.add('no-reveal'); // 기본 리빌 대신 게시판 효과 사용
@@ -334,33 +459,53 @@ function pageBoard(category) {
   $('#search-input').addEventListener('input', (e) => draw(e.target.value.trim()));
 }
 
-/* ===== 페이지: 글쓰기 / 수정 (관리자 전용) ===== */
-function pageWrite(editId) {
+/* ===== 페이지: 글쓰기 / 수정 (관리자 전용) — isPage=true면 커스텀 페이지 작성 ===== */
+async function pageWrite(editId, isPage = false) {
   if (!admin.isLoggedIn()) {
-    admin.login().then((ok) => {
-      applyAdminUI();
-      if (ok) pageWrite(editId);
-      else location.hash = '#/';
-    });
+    const ok = await admin.login();
+    applyAdminUI();
+    if (ok) pageWrite(editId, isPage);
+    else location.hash = '#/';
     return;
   }
   render('tpl-write');
-  const posts = store.getPosts();
-  const editing = editId ? posts.find((p) => p.id === editId) : null;
-  if (editId && !editing) { location.hash = '#/board'; return; }
+  let editing = null, boardNames = [], posts = [];
+  try {
+    if (isPage) {
+      if (editId) {
+        editing = await db.getPage(editId);
+        if (!editing) { location.hash = '#/'; return; }
+      }
+    } else {
+      [boardNames, posts] = await Promise.all([db.getBoards(), db.getPosts()]);
+      if (editId) {
+        editing = await db.getPost(editId);
+        if (!editing) { location.hash = '#/board'; return; }
+      }
+    }
+  } catch (e) { dbError(e); return; }
+  if (!$('#write-form')) return;
 
   const editor = $('#editor');
   const htmlSrc = $('#html-source');
   let mode = 'editor';
 
-  $('#category-options').innerHTML =
-    [...new Set([...store.getBoards(), ...posts.map((p) => p.category).filter(Boolean)])]
-      .map((c) => `<option value="${escapeHtml(c)}">`).join('');
+  if (isPage) {
+    // 페이지에는 게시판 분류 없음
+    $('#post-category').closest('.field').hidden = true;
+    $('#write-title').textContent = editing ? '페이지 수정' : '새 페이지';
+  } else {
+    $('#category-options').innerHTML =
+      [...new Set([...boardNames, ...posts.map((p) => p.category).filter(Boolean)])]
+        .map((c) => `<option value="${escapeHtml(c)}">`).join('');
+  }
 
   if (editing) {
-    $('#write-title').textContent = '글 수정';
+    if (!isPage) {
+      $('#write-title').textContent = '글 수정';
+      $('#post-category').value = editing.category || '';
+    }
     $('#post-title').value = editing.title;
-    $('#post-category').value = editing.category || '';
     editor.innerHTML = editing.content;
   }
 
@@ -398,7 +543,6 @@ function pageWrite(editId) {
   });
 
   // 사진 첨부: 파일 → 리사이즈·압축 → data URL로 본문 삽입
-  // ponytail: localStorage 한계(~5MB) 대응으로 최대 1280px·JPEG 0.8 압축. 대용량 필요하면 이미지 호스팅(imgur 등) URL 사용
   $('#btn-photo').addEventListener('click', () => $('#photo-input').click());
   $('#photo-input').addEventListener('change', async (e) => {
     for (const file of e.target.files) {
@@ -413,38 +557,39 @@ function pageWrite(editId) {
     e.target.value = '';
   });
 
-  $('#write-form').addEventListener('submit', (e) => {
+  $('#write-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const content = mode === 'html' ? htmlSrc.value : editor.innerHTML;
     if (!content.trim()) { alert('본문을 입력하세요.'); return; }
-    if (editing) {
-      editing.title = $('#post-title').value.trim();
-      editing.category = $('#post-category').value.trim();
-      editing.content = content;
-      editing.updatedAt = new Date().toISOString();
-    } else {
-      posts.push({
-        id: Date.now().toString(36),
-        title: $('#post-title').value.trim(),
-        category: $('#post-category').value.trim(),
-        content,
-        createdAt: new Date().toISOString(),
-      });
-    }
+    const payload = {
+      title: $('#post-title').value.trim(),
+      category: $('#post-category').value.trim(),
+      content,
+    };
     try {
-      store.setPosts(posts);
-    } catch {
-      alert('저장 공간이 가득 찼습니다. 첨부 사진 수를 줄이거나 기존 글을 정리하세요.');
-      return;
-    }
-    location.hash = editing ? '#/post/' + editing.id : '#/post/' + posts[posts.length - 1].id;
+      if (isPage) {
+        if (editing) {
+          await db.updatePage(editing.id, payload);
+          location.hash = '#/page/' + editing.id;
+        } else {
+          const newId = await db.createPage(payload);
+          location.hash = '#/page/' + newId;
+        }
+      } else if (editing) {
+        await db.updatePost(editing.id, payload);
+        location.hash = '#/post/' + editing.id;
+      } else {
+        const newId = await db.createPost(payload);
+        location.hash = '#/post/' + newId;
+      }
+    } catch (e2) { dbError(e2); }
   });
 }
 
 /* ===== 페이지: 글 보기 + 댓글 ===== */
-function pagePost(id) {
-  const posts = store.getPosts();
-  const post = posts.find((p) => p.id === id);
+async function pagePost(id) {
+  let post;
+  try { post = await db.getPost(id); } catch (e) { dbError(e); return; }
   if (!post) { location.hash = '#/board'; return; }
 
   render('tpl-post');
@@ -457,11 +602,10 @@ function pagePost(id) {
     e.preventDefault();
     location.hash = '#/write/' + post.id;
   });
-  $('#btn-delete-post').addEventListener('click', (e) => {
+  $('#btn-delete-post').addEventListener('click', async (e) => {
     e.preventDefault();
     if (!admin.isLoggedIn() || !confirm('이 글을 삭제할까요?')) return;
-    store.setPosts(posts.filter((p) => p.id !== id));
-    localStorage.removeItem('blog_comments_' + id);
+    try { await db.deletePost(id); } catch (e2) { dbError(e2); return; }
     location.hash = '#/board';
   });
 
@@ -495,12 +639,9 @@ function pagePost(id) {
     if (!name || !pw || !body) return;
 
     const comment = {
-      id: Date.now().toString(36),
       name,
       pwHash: await sha256(pw),
-      createdAt: new Date().toISOString(),
       secret,
-      status: 'pending',
       spam: isSpam(body),
     };
     if (secret) {
@@ -511,14 +652,9 @@ function pagePost(id) {
       if (pendingPhoto) comment.photo = pendingPhoto;
     }
 
-    const comments = store.getComments(id);
-    comments.push(comment);
     try {
-      store.setComments(id, comments);
-    } catch {
-      alert('저장 공간이 가득 찼습니다. 사진 크기를 줄이거나 관리자에게 문의하세요.');
-      return;
-    }
+      await db.addComment(id, comment);
+    } catch (e2) { dbError(e2); return; }
     e.target.reset();
     clearPhoto();
     alert(comment.spam
@@ -528,27 +664,30 @@ function pagePost(id) {
   });
 }
 
-function drawComments(postId) {
-  const all = store.getComments(postId);
-  const isAdmin = admin.isLoggedIn();
-  const comments = isAdmin ? all : all.filter((c) => c.status === 'approved');
-  $('#comment-count').textContent = comments.length;
+async function drawComments(postId) {
+  let all;
+  try { all = await db.getComments(postId); } catch (e) { dbError(e); return; }
   const list = $('#comment-list');
+  if (!list) return; // 페이지 이동됨
+  const isAdmin = admin.isLoggedIn();
+  // RLS로 비관리자는 승인된 댓글만 내려옴 — 클라이언트 필터는 이중 안전장치
+  const comments = isAdmin ? all : all.filter((c) => c.approved);
+  $('#comment-count').textContent = comments.length;
 
   const statusBadge = (c) => {
-    if (!isAdmin || c.status === 'approved') return '';
+    if (!isAdmin || c.approved) return '';
     return c.spam
       ? '<span class="badge badge-spam">스팸 의심</span>'
       : '<span class="badge badge-pending">승인 대기</span>';
   };
   const adminActions = (c) => {
     if (!isAdmin) return '';
-    const approve = c.status !== 'approved' ? '<a href="#" class="btn-approve">승인</a>' : '';
+    const approve = !c.approved ? '<a href="#" class="btn-approve">승인</a>' : '';
     return `${approve}<a href="#" class="btn-admin-del">삭제(관리자)</a>`;
   };
 
   list.innerHTML = comments.map((c) => `
-    <li class="comment-item ${c.status !== 'approved' ? 'is-pending' : ''}" data-id="${c.id}">
+    <li class="comment-item ${!c.approved ? 'is-pending' : ''}" data-id="${c.id}">
       <div class="comment-head">
         <span class="comment-name">${c.secret ? '<svg class="icon-sm lock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> ' : ''}${escapeHtml(c.name)} ${statusBadge(c)}</span>
         <span class="comment-date">${fmtDate(c.createdAt)}</span>
@@ -592,44 +731,89 @@ function drawComments(postId) {
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
       const item = btn.closest('.comment-item');
-      const c = all.find((x) => x.id === item.dataset.id);
       const pw = prompt('댓글 비밀번호를 입력하세요');
       if (pw === null) return;
-      if (await sha256(pw) !== c.pwHash) { alert('비밀번호가 일치하지 않습니다.'); return; }
-      store.setComments(postId, all.filter((x) => x.id !== c.id));
+      try {
+        const ok = await db.deleteCommentWithPw(item.dataset.id, await sha256(pw));
+        if (!ok) { alert('비밀번호가 일치하지 않습니다.'); return; }
+      } catch (e2) { dbError(e2); return; }
       drawComments(postId);
     });
   });
 
   list.querySelectorAll('.btn-approve').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
+    btn.addEventListener('click', async (e) => {
       e.preventDefault();
       if (!admin.isLoggedIn()) return;
-      const c = all.find((x) => x.id === btn.closest('.comment-item').dataset.id);
-      c.status = 'approved';
-      c.spam = false;
-      store.setComments(postId, all);
+      try { await db.approveComment(btn.closest('.comment-item').dataset.id); } catch (e2) { dbError(e2); return; }
       drawComments(postId);
     });
   });
 
   list.querySelectorAll('.btn-admin-del').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
+    btn.addEventListener('click', async (e) => {
       e.preventDefault();
       if (!admin.isLoggedIn() || !confirm('이 댓글을 삭제할까요?')) return;
-      const cid = btn.closest('.comment-item').dataset.id;
-      store.setComments(postId, all.filter((x) => x.id !== cid));
+      try { await db.deleteCommentAdmin(btn.closest('.comment-item').dataset.id); } catch (e2) { dbError(e2); return; }
       drawComments(postId);
     });
   });
 }
 
-/* ===== 라우터 ===== */
+/* ===== 페이지: 커스텀 페이지 보기 ===== */
+async function pageView(id) {
+  let page;
+  try { page = await db.getPage(id); } catch (e) { dbError(e); return; }
+  if (!page) { location.hash = '#/'; return; }
+
+  render('tpl-page');
+  $('#page-title').textContent = page.title;
+  $('#page-date').textContent = fmtDate(page.createdAt);
+  $('#page-content').innerHTML = page.content; // 관리자 본인 HTML — 그대로 렌더
+
+  $('#btn-edit-page').addEventListener('click', (e) => {
+    e.preventDefault();
+    location.hash = '#/pagewrite/' + page.id;
+  });
+  $('#btn-delete-page').addEventListener('click', async (e) => {
+    e.preventDefault();
+    if (!admin.isLoggedIn() || !confirm('이 페이지를 삭제할까요?')) return;
+    try { await db.deletePage(id); } catch (e2) { dbError(e2); return; }
+    location.hash = '#/';
+  });
+}
+
 /* ===== 페이지: 화면 설정 (관리자) ===== */
-function pageSettings() {
+async function pageSettings() {
   if (!admin.isLoggedIn()) { location.hash = '#/'; return; }
   render('tpl-settings');
-  const saved = store.getSiteImages();
+  let saved, savedFx, boardNames, posts, pages;
+  try {
+    [saved, savedFx, boardNames, posts, pages] = await Promise.all([
+      db.getSetting('site_images'), db.getSetting('board_fx'), db.getBoards(), db.getPosts(), db.getPages(),
+    ]);
+  } catch (e) { dbError(e); return; }
+  if (!$('#slot-list')) return;
+
+  // 페이지 관리
+  $('#page-manage-list').innerHTML = pages.length
+    ? pages.map((p) => `<div class="page-manage-row" data-id="${p.id}">
+        <a href="#/page/${p.id}" class="page-manage-title">${escapeHtml(p.title)}</a>
+        <span class="page-manage-date">${fmtDate(p.createdAt)}</span>
+        <a href="#/pagewrite/${p.id}" class="btn-attach">수정</a>
+        <button type="button" class="btn-attach btn-del-page">삭제</button>
+      </div>`).join('')
+    : '<p class="empty-msg">아직 페이지가 없습니다.</p>';
+  $('#btn-new-page').addEventListener('click', () => { location.hash = '#/pagewrite'; });
+  $('#page-manage-list').addEventListener('click', async (e) => {
+    const btn = e.target.closest('.btn-del-page');
+    if (!btn) return;
+    const row = btn.closest('.page-manage-row');
+    if (!confirm('이 페이지를 삭제할까요?')) return;
+    try { await db.deletePage(row.dataset.id); } catch (e2) { dbError(e2); return; }
+    row.remove();
+  });
+
   const draft = {};
   IMAGE_SLOTS.forEach((s) => {
     draft[s.key] = { src: saved[s.key]?.src || '', fx: saved[s.key]?.fx || 'none' };
@@ -683,9 +867,8 @@ function pageSettings() {
   });
 
   // 게시판별 등장 효과
-  const savedFx = store.getBoardFx();
-  const postCats = [...new Set(store.getPosts().map((p) => p.category || '미분류'))];
-  const fxBoards = ['전체', ...new Set([...store.getBoards(), ...postCats])];
+  const postCats = [...new Set(posts.map((p) => p.category || '미분류'))];
+  const fxBoards = ['전체', ...new Set([...boardNames, ...postCats])];
   const draftFx = {};
   fxBoards.forEach((b) => { draftFx[b] = savedFx[b] || 'rise'; });
 
@@ -717,7 +900,7 @@ function pageSettings() {
     requestAnimationFrame(() => requestAnimationFrame(() => sample.classList.add('in-view')));
   });
 
-  $('#btn-save-settings').addEventListener('click', () => {
+  $('#btn-save-settings').addEventListener('click', async () => {
     const out = {};
     IMAGE_SLOTS.forEach((s) => {
       const d = draft[s.key];
@@ -726,23 +909,24 @@ function pageSettings() {
     const fxOut = {};
     Object.entries(draftFx).forEach(([b, f]) => { if (f !== 'rise') fxOut[b] = f; });
     try {
-      store.setSiteImages(out);
-      store.setBoardFx(fxOut);
+      await db.setSetting('site_images', out);
+      await db.setSetting('board_fx', fxOut);
       alert('저장했습니다.');
       location.hash = '#/';
-    } catch {
-      alert('저장 공간이 부족합니다. 업로드 대신 이미지 URL을 사용해 보세요.');
-    }
+    } catch (e) { dbError(e); }
   });
-  $('#btn-reset-settings').addEventListener('click', () => {
+  $('#btn-reset-settings').addEventListener('click', async () => {
     if (!confirm('모든 사진과 효과를 기본값으로 되돌릴까요?')) return;
-    localStorage.removeItem('blog_site_images');
-    localStorage.removeItem('blog_board_fx');
+    try {
+      await db.setSetting('site_images', {});
+      await db.setSetting('board_fx', {});
+    } catch (e) { dbError(e); return; }
     alert('기본값으로 되돌렸습니다.');
     location.hash = '#/';
   });
 }
 
+/* ===== 라우터 ===== */
 function route() {
   const hash = location.hash || '#/';
   const parts = hash.slice(2).split('/').map(decodeURIComponent);
@@ -756,6 +940,10 @@ function route() {
     pageWrite(parts[1] || null);
   } else if (parts[0] === 'post') {
     pagePost(parts[1]);
+  } else if (parts[0] === 'page') {
+    pageView(parts[1]);
+  } else if (parts[0] === 'pagewrite') {
+    pageWrite(parts[1] || null, true);
   } else if (parts[0] === 'settings') {
     $('[data-nav="settings"]')?.classList.add('active');
     pageSettings();
@@ -771,22 +959,16 @@ window.addEventListener('hashchange', route);
 $('#btn-admin').addEventListener('click', async (e) => {
   e.preventDefault();
   if (admin.isLoggedIn()) {
-    admin.logout();
+    await admin.logout();
   } else {
     await admin.login();
   }
   route();
 });
 
-/* 첫 방문 시 샘플 글 */
-if (!localStorage.getItem('blog_posts')) {
-  store.setPosts([{
-    id: 'welcome',
-    title: '블로그를 시작합니다',
-    category: '공지',
-    content: '<p>丕刀卜己卜人丨廿卜 블로그에 오신 것을 환영합니다.</p><p>관리자로 로그인하면 <b>글쓰기</b> 버튼이 나타나고, HTML 모드에서는 코드를 직접 붙여넣을 수 있습니다.</p><blockquote>기록은 생각을 단단하게 만든다.</blockquote>',
-    createdAt: new Date().toISOString(),
-  }]);
-}
-
-route();
+/* 부팅: 세션 복원 후 첫 라우트 */
+showLoading();
+sb.auth.getSession().then(({ data }) => {
+  adminOn = !!data.session;
+  route();
+});

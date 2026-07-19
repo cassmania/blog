@@ -282,6 +282,35 @@ main { max-width: var(--container); margin: 0 auto; padding: 0 24px 120px; }
 }
 
 .settings-sub { margin-top: 48px; }
+
+/* 커스텀 페이지 */
+.page-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+}
+.page-card {
+  display: block;
+  padding: 22px 20px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  font-family: var(--serif);
+  font-size: 1.05rem;
+  transition: border-color 0.2s, transform 0.2s;
+}
+.page-card:hover { border-color: var(--ink); transform: translateY(-2px); }
+.page-manage-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.page-manage-title { font-weight: 500; }
+.page-manage-date { color: var(--ink-faint); font-size: 0.85rem; }
+#btn-new-page { margin-top: 14px; }
 .fx-row {
   display: grid;
   grid-template-columns: 140px auto auto 1fr;

@@ -100,6 +100,13 @@
     </div>
   </section>
 
+  <section class="post-section" id="custom-pages-section" hidden>
+    <div class="section-head">
+      <h2 class="section-title">페이지</h2>
+    </div>
+    <div class="page-grid" id="custom-pages"></div>
+  </section>
+
   <section class="post-section">
     <div class="section-head">
       <h2 class="section-title">최근 글</h2>
@@ -107,6 +114,23 @@
     </div>
     <div class="card-grid" id="recent-posts"></div>
   </section>
+</template>
+
+<template id="tpl-page">
+  <article class="post-view">
+    <header class="post-header">
+      <span class="post-category">페이지</span>
+      <h1 id="page-title"></h1>
+      <div class="post-meta">
+        <time id="page-date"></time>
+        <span class="meta-actions admin-only" hidden>
+          <a href="#" id="btn-edit-page">수정</a>
+          <a href="#" id="btn-delete-page">삭제</a>
+        </span>
+      </div>
+    </header>
+    <div class="post-content" id="page-content"></div>
+  </article>
 </template>
 
 <template id="tpl-board">
@@ -182,6 +206,11 @@
     <p class="settings-note">홈 화면의 사진과 등장 효과를 변경합니다. 저장하면 바로 반영됩니다.</p>
     <div id="slot-list"></div>
 
+    <h2 class="section-title settings-sub">페이지 관리</h2>
+    <p class="settings-note">자유 페이지를 만들어 홈 화면에 노출합니다. 개수 제한이 없습니다.</p>
+    <div id="page-manage-list"></div>
+    <button type="button" id="btn-new-page" class="btn-attach">+ 새 페이지</button>
+
     <h2 class="section-title settings-sub">게시판 등장 효과</h2>
     <p class="settings-note">게시판마다 글 목록이 나타나는 방식을 고릅니다. 미리보기를 눌러 직접 확인하세요.</p>
     <div id="board-fx-list"></div>
@@ -236,6 +265,7 @@
   </article>
 </template>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.min.js" integrity="sha384-WmjsOVSSw3JNqIKfmDU35+uddOzBdP9PlYIWCg7xdnVOesjWVGpRcooOVheFFwH4" crossorigin="anonymous"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
