@@ -475,6 +475,7 @@ async function pageWrite(editId, isPage = false) {
       if (editId) {
         editing = await db.getPage(editId);
         if (!editing) { location.hash = '#/'; return; }
+        if (parseBuilderContent(editing.content)) { location.hash = '#/pagebuild/' + editId; return; }
       }
     } else {
       [boardNames, posts] = await Promise.all([db.getBoards(), db.getPosts()]);
@@ -760,11 +761,209 @@ async function drawComments(postId) {
   });
 }
 
+/* ===== 디자인 페이지 (블록 조립) ===== */
+const BLOCK_DEFAULTS = {
+  hero: { img: 'https://picsum.photos/seed/build-hero/1920/900', eyebrow: 'A PERSONAL ARCHIVE', title: '제목을 입력하세요', btnText: '', btnLink: '' },
+  intro: { label: 'THE ARCHIVE', text: '소개 문단을 입력하세요.' },
+  split: { img: 'https://picsum.photos/seed/build-split/1000/750', num: '01 — 소제목', title: '제목을 입력하세요', body: '내용을 입력하세요.', reverse: false },
+  banner: { img: 'https://picsum.photos/seed/build-band/1920/700', quote: '인용구를 입력하세요.' },
+};
+const BLOCK_NAMES = { hero: '히어로', intro: '소개 문단', split: '이미지 + 글', banner: '인용 배너' };
+
+function parseBuilderContent(content) {
+  try {
+    const j = JSON.parse(content);
+    if (j && Array.isArray(j.blocks)) return j.blocks;
+  } catch { /* 일반 HTML 페이지 */ }
+  return null;
+}
+
+/* 블록 배열 → 메인 화면과 동일한 마크업 */
+function blocksHtml(blocks) {
+  return blocks.map((b) => {
+    if (b.type === 'hero') {
+      const btn = b.btnText ? `<a href="${escapeHtml(b.btnLink || '#')}" class="btn-pill">${escapeHtml(b.btnText)}</a>` : '';
+      return `<section class="hero-full">
+        <img src="${escapeHtml(b.img)}" alt="" loading="eager">
+        <div class="hero-overlay">
+          ${b.eyebrow ? `<p class="hero-eyebrow">${escapeHtml(b.eyebrow)}</p>` : ''}
+          <h1>${escapeHtml(b.title)}</h1>
+          ${btn}
+        </div>
+      </section>`;
+    }
+    if (b.type === 'intro') {
+      return `<section class="intro-split">
+        <span class="intro-label">${escapeHtml(b.label)}</span>
+        <p class="intro-text">${escapeHtml(b.text)}</p>
+      </section>`;
+    }
+    if (b.type === 'split') {
+      return `<section class="alt-row ${b.reverse ? 'alt-reverse' : ''}">
+        <div class="alt-media"><img src="${escapeHtml(b.img)}" alt="" loading="lazy"></div>
+        <div class="alt-body">
+          ${b.num ? `<span class="feature-num">${escapeHtml(b.num)}</span>` : ''}
+          <h2>${escapeHtml(b.title)}</h2>
+          <p>${escapeHtml(b.body)}</p>
+        </div>
+      </section>`;
+    }
+    if (b.type === 'banner') {
+      return `<section class="interstitial">
+        <img src="${escapeHtml(b.img)}" alt="" loading="lazy">
+        <p class="interstitial-quote">${escapeHtml(b.quote)}</p>
+      </section>`;
+    }
+    return '';
+  }).join('');
+}
+
+/* ===== 페이지: 디자인 페이지 빌더 (관리자) ===== */
+async function pageBuild(editId) {
+  if (!admin.isLoggedIn()) {
+    const ok = await admin.login();
+    applyAdminUI();
+    if (ok) pageBuild(editId);
+    else location.hash = '#/';
+    return;
+  }
+  render('tpl-pagebuild');
+  let editing = null;
+  if (editId) {
+    try { editing = await db.getPage(editId); } catch (e) { dbError(e); return; }
+    if (!editing) { location.hash = '#/settings'; return; }
+    $('#build-title').textContent = '디자인 페이지 수정';
+    $('#build-page-title').value = editing.title;
+  }
+  const blocks = editing ? (parseBuilderContent(editing.content) || []) : [{ type: 'hero', ...BLOCK_DEFAULTS.hero }];
+
+  const fieldHtml = (b, i) => {
+    if (b.type === 'hero') {
+      return `<div class="field"><label>배경 사진</label>${imgField(b.img)}</div>
+        <div class="field"><label>작은 문구 (선택)</label><input data-k="eyebrow" value="${escapeHtml(b.eyebrow)}"></div>
+        <div class="field"><label>큰 제목</label><input data-k="title" value="${escapeHtml(b.title)}"></div>
+        <div class="field-row">
+          <div class="field"><label>버튼 문구 (선택)</label><input data-k="btnText" value="${escapeHtml(b.btnText)}"></div>
+          <div class="field"><label>버튼 링크</label><input data-k="btnLink" value="${escapeHtml(b.btnLink)}" placeholder="#/board"></div>
+        </div>`;
+    }
+    if (b.type === 'intro') {
+      return `<div class="field"><label>라벨</label><input data-k="label" value="${escapeHtml(b.label)}"></div>
+        <div class="field"><label>문단</label><textarea data-k="text" rows="3">${escapeHtml(b.text)}</textarea></div>`;
+    }
+    if (b.type === 'split') {
+      return `<div class="field"><label>사진</label>${imgField(b.img)}</div>
+        <div class="field"><label>번호 문구 (선택)</label><input data-k="num" value="${escapeHtml(b.num)}"></div>
+        <div class="field"><label>제목</label><input data-k="title" value="${escapeHtml(b.title)}"></div>
+        <div class="field"><label>내용</label><textarea data-k="body" rows="3">${escapeHtml(b.body)}</textarea></div>
+        <label class="secret-label"><input type="checkbox" data-k="reverse" ${b.reverse ? 'checked' : ''}> 사진을 오른쪽에</label>`;
+    }
+    if (b.type === 'banner') {
+      return `<div class="field"><label>배경 사진</label>${imgField(b.img)}</div>
+        <div class="field"><label>인용구</label><textarea data-k="quote" rows="2">${escapeHtml(b.quote)}</textarea></div>`;
+    }
+    return '';
+  };
+  const imgField = (src) => `<div class="build-img-row">
+      <img class="build-img-preview" src="${escapeHtml(src)}" alt="">
+      <input data-k="img" value="${escapeHtml(src)}" placeholder="이미지 URL">
+      <button type="button" class="btn-attach build-upload">업로드</button>
+      <input type="file" class="build-file" accept="image/*" hidden>
+    </div>`;
+
+  const drawBlocks = () => {
+    $('#block-list').innerHTML = blocks.map((b, i) => `
+      <div class="block-card" data-i="${i}">
+        <div class="block-head">
+          <strong>${BLOCK_NAMES[b.type]}</strong>
+          <span class="block-tools">
+            <button type="button" class="btn-attach block-up" ${i === 0 ? 'disabled' : ''}>↑</button>
+            <button type="button" class="btn-attach block-down" ${i === blocks.length - 1 ? 'disabled' : ''}>↓</button>
+            <button type="button" class="btn-attach block-del">삭제</button>
+          </span>
+        </div>
+        ${fieldHtml(b, i)}
+      </div>`).join('');
+  };
+  drawBlocks();
+
+  $('#block-list').addEventListener('input', (e) => {
+    const card = e.target.closest('.block-card');
+    const k = e.target.dataset.k;
+    if (!card || !k) return;
+    const b = blocks[+card.dataset.i];
+    b[k] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+    if (k === 'img') card.querySelector('.build-img-preview').src = e.target.value || 'https://picsum.photos/seed/blank/400/300';
+  });
+  $('#block-list').addEventListener('click', async (e) => {
+    const card = e.target.closest('.block-card');
+    if (!card) return;
+    const i = +card.dataset.i;
+    if (e.target.closest('.block-del')) { blocks.splice(i, 1); drawBlocks(); return; }
+    if (e.target.closest('.block-up') && i > 0) { [blocks[i - 1], blocks[i]] = [blocks[i], blocks[i - 1]]; drawBlocks(); return; }
+    if (e.target.closest('.block-down') && i < blocks.length - 1) { [blocks[i + 1], blocks[i]] = [blocks[i], blocks[i + 1]]; drawBlocks(); return; }
+    if (e.target.closest('.build-upload')) card.querySelector('.build-file').click();
+  });
+  $('#block-list').addEventListener('change', async (e) => {
+    if (!e.target.classList.contains('build-file') || !e.target.files[0]) return;
+    const card = e.target.closest('.block-card');
+    try {
+      const dataUrl = await compressImage(e.target.files[0], 1600, 0.8);
+      blocks[+card.dataset.i].img = dataUrl;
+      card.querySelector('.build-img-preview').src = dataUrl;
+      card.querySelector('input[data-k="img"]').value = '';
+    } catch { alert('이미지 파일인지 확인하세요.'); }
+    e.target.value = '';
+  });
+
+  $('.block-add-bar').addEventListener('click', (e) => {
+    const t = e.target.closest('[data-add]');
+    if (!t) return;
+    blocks.push({ type: t.dataset.add, ...BLOCK_DEFAULTS[t.dataset.add] });
+    drawBlocks();
+    $('#block-list').lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+
+  $('#btn-save-build').addEventListener('click', async () => {
+    const title = $('#build-page-title').value.trim();
+    if (!title) { alert('페이지 제목을 입력하세요.'); return; }
+    if (!blocks.length) { alert('블록을 하나 이상 추가하세요.'); return; }
+    const payload = { title, content: JSON.stringify({ blocks }) };
+    try {
+      if (editing) {
+        await db.updatePage(editing.id, payload);
+        location.hash = '#/page/' + editing.id;
+      } else {
+        const newId = await db.createPage(payload);
+        location.hash = '#/page/' + newId;
+      }
+    } catch (e) { dbError(e); }
+  });
+}
+
 /* ===== 페이지: 커스텀 페이지 보기 ===== */
 async function pageView(id) {
   let page;
   try { page = await db.getPage(id); } catch (e) { dbError(e); return; }
   if (!page) { location.hash = '#/'; return; }
+
+  const blocks = parseBuilderContent(page.content);
+  if (blocks) {
+    // 디자인 페이지: 메인 화면과 동일한 풀폭 레이아웃
+    app.innerHTML = `<div class="build-admin-bar admin-only" hidden>
+        <span>${escapeHtml(page.title)}</span>
+        <span class="meta-actions"><a href="#/pagebuild/${page.id}">수정</a> <a href="#" id="btn-delete-page">삭제</a></span>
+      </div>` + blocksHtml(blocks);
+    applyAdminUI();
+    $('#btn-delete-page')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      if (!admin.isLoggedIn() || !confirm('이 페이지를 삭제할까요?')) return;
+      try { await db.deletePage(id); } catch (e2) { dbError(e2); return; }
+      location.hash = '#/';
+    });
+    initReveal();
+    return;
+  }
 
   render('tpl-page');
   $('#page-title').textContent = page.title;
@@ -805,6 +1004,7 @@ async function pageSettings() {
       </div>`).join('')
     : '<p class="empty-msg">아직 페이지가 없습니다.</p>';
   $('#btn-new-page').addEventListener('click', () => { location.hash = '#/pagewrite'; });
+  $('#btn-new-build').addEventListener('click', () => { location.hash = '#/pagebuild'; });
   $('#page-manage-list').addEventListener('click', async (e) => {
     const btn = e.target.closest('.btn-del-page');
     if (!btn) return;
@@ -944,6 +1144,8 @@ function route() {
     pageView(parts[1]);
   } else if (parts[0] === 'pagewrite') {
     pageWrite(parts[1] || null, true);
+  } else if (parts[0] === 'pagebuild') {
+    pageBuild(parts[1] || null);
   } else if (parts[0] === 'settings') {
     $('[data-nav="settings"]')?.classList.add('active');
     pageSettings();

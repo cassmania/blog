@@ -209,7 +209,8 @@
     <h2 class="section-title settings-sub">페이지 관리</h2>
     <p class="settings-note">자유 페이지를 만들어 홈 화면에 노출합니다. 개수 제한이 없습니다.</p>
     <div id="page-manage-list"></div>
-    <button type="button" id="btn-new-page" class="btn-attach">+ 새 페이지</button>
+    <button type="button" id="btn-new-page" class="btn-attach">+ 새 페이지 (글 형식)</button>
+    <button type="button" id="btn-new-build" class="btn-attach">+ 새 디자인 페이지 (블록 조립)</button>
 
     <h2 class="section-title settings-sub">게시판 등장 효과</h2>
     <p class="settings-note">게시판마다 글 목록이 나타나는 방식을 고릅니다. 미리보기를 눌러 직접 확인하세요.</p>
@@ -218,6 +219,29 @@
     <div class="form-actions">
       <button type="button" id="btn-save-settings" class="btn-primary">저장</button>
       <button type="button" id="btn-reset-settings" class="btn-secondary">기본값으로</button>
+    </div>
+  </section>
+</template>
+
+<template id="tpl-pagebuild">
+  <section class="write-page">
+    <h2 class="section-title" id="build-title">디자인 페이지 만들기</h2>
+    <p class="settings-note">메인 화면과 같은 디자인 블록을 쌓아 페이지를 만듭니다. 블록마다 사진과 글을 자유롭게 바꾸세요.</p>
+    <div class="field">
+      <label for="build-page-title">페이지 제목</label>
+      <input type="text" id="build-page-title" required placeholder="페이지 제목">
+    </div>
+    <div id="block-list"></div>
+    <div class="block-add-bar">
+      <span>블록 추가:</span>
+      <button type="button" class="btn-attach" data-add="hero">히어로</button>
+      <button type="button" class="btn-attach" data-add="intro">소개 문단</button>
+      <button type="button" class="btn-attach" data-add="split">이미지 + 글</button>
+      <button type="button" class="btn-attach" data-add="banner">인용 배너</button>
+    </div>
+    <div class="form-actions">
+      <button type="button" id="btn-save-build" class="btn-primary">저장</button>
+      <a href="#/settings" class="btn-secondary">취소</a>
     </div>
   </section>
 </template>
