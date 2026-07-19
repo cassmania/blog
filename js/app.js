@@ -365,13 +365,17 @@ function applySiteImages(saved) {
 async function pageHome() {
   render('tpl-home');
   try {
-    const [posts, images, pages, home] = await Promise.all([
+    const [posts, images, pages, home, texts] = await Promise.all([
       db.getPosts(), db.getSetting('site_images'), db.getPages(), db.getSetting('home_blocks'),
+      db.getSetting('home_texts'),
     ]);
     applySiteImages(images);
+    applyHomeTexts(texts);
     if (Array.isArray(home.blocks) && home.blocks.length) {
-      // 조립한 블록은 기본 홈 아래에 추가 (기존 화면 유지)
-      $('#custom-pages-section').insertAdjacentHTML('beforebegin', blocksHtml(home.blocks));
+      // 조립한 블록: 기존 화면 유지, 선택한 위치(위/아래)에 추가
+      const html = blocksHtml(home.blocks);
+      if (home.position === 'top') app.insertAdjacentHTML('afterbegin', html);
+      else $('#custom-pages-section').insertAdjacentHTML('beforebegin', html);
       applyBlockFx();
     }
     const box = $('#recent-posts');
@@ -799,9 +803,34 @@ const BLOCK_DEFAULTS = {
   split: { img: 'https://picsum.photos/seed/build-split/1000/750', num: '01 — 소제목', title: '제목을 입력하세요', body: '내용을 입력하세요.', reverse: false, fx: 'rise', speed: 'normal' },
   banner: { img: 'https://picsum.photos/seed/build-band/1920/700', quote: '인용구를 입력하세요.', fx: 'fade', speed: 'normal' },
   photo: { img: 'https://picsum.photos/seed/build-photo/1600/900', caption: '', fx: 'fade', speed: 'normal' },
-  gallery: { imgs: [], cols: '3', fx: 'fade', speed: 'normal' },
+  gallery: { imgs: [], cols: '3', ratio: '1', fx: 'fade', speed: 'normal' },
+  slideshow: { imgs: [], interval: '4', height: 'm', fx: 'fade', speed: 'normal' },
 };
-const BLOCK_NAMES = { hero: '히어로', intro: '소개 문단', split: '이미지 + 글', banner: '인용 배너', photo: '사진', gallery: '사진 갤러리' };
+const BLOCK_NAMES = { hero: '히어로', intro: '소개 문단', split: '이미지 + 글', banner: '인용 배너', photo: '사진', gallery: '사진 갤러리', slideshow: '슬라이드쇼' };
+
+/* 기본 홈 문구 (설정에서 덮어쓰기) */
+const HOME_TEXTS = [
+  { key: 'heroEyebrow', label: '히어로 작은 문구', sel: '.hero-eyebrow', def: 'A PERSONAL ARCHIVE' },
+  { key: 'heroTitle', label: '히어로 큰 제목', sel: '.hero-full h1', def: '기록은 생각을\n단단하게 만든다', multi: true },
+  { key: 'introLabel', label: '소개 라벨', sel: '.intro-label', def: 'THE ARCHIVE' },
+  { key: 'introText', label: '소개 문단', sel: '.intro-text', def: '이곳은 흘러가는 것들을 붙잡아 두는 공간입니다. 일상과 공부, 프로젝트의 기록이 쌓여 하나의 아카이브가 됩니다. 불필요한 것을 덜어내고, 글과 사진에만 집중합니다.', multi: true },
+  { key: 'f1num', label: '01 섹션 번호 문구', sel: '.alt-row:not(.alt-reverse) .feature-num', def: '01 — 기록' },
+  { key: 'f1title', label: '01 섹션 제목', sel: '.alt-row:not(.alt-reverse) h2', def: '짧아도 좋고,\n길어도 좋습니다', multi: true },
+  { key: 'f1body', label: '01 섹션 내용', sel: '.alt-row:not(.alt-reverse) .alt-body p', def: '리치텍스트 에디터와 HTML 모드, 사진 첨부까지. 형식에 얽매이지 않고 그날의 생각을 그대로 남깁니다.', multi: true },
+  { key: 'f2num', label: '02 섹션 번호 문구', sel: '.alt-reverse .feature-num', def: '02 — 대화' },
+  { key: 'f2title', label: '02 섹션 제목', sel: '.alt-reverse h2', def: '사진과 함께\n생각을 나눕니다', multi: true },
+  { key: 'f2body', label: '02 섹션 내용', sel: '.alt-reverse .alt-body p', def: '누구나 댓글에 사진을 첨부해 순간을 공유할 수 있습니다. 조용히 남기고 싶다면 비밀댓글로 — 암호화되어 저장됩니다.', multi: true },
+  { key: 'bannerQuote', label: '중간 배너 인용구', sel: '.interstitial-quote', def: '여백을 껴안고,\n단순함 속에서 명료함을 찾다.', multi: true },
+];
+
+function applyHomeTexts(saved) {
+  HOME_TEXTS.forEach((t) => {
+    const v = saved[t.key];
+    if (!v) return;
+    const el = app.querySelector(t.sel);
+    if (el) el.innerHTML = escapeHtml(v).replace(/\n/g, '<br>');
+  });
+}
 
 /* 블록 등장 효과 + 속도 */
 const BLOCK_FX = [
@@ -839,6 +868,7 @@ function applyBlockFx(root = app) {
       safeObserve(t);
     });
   });
+  initSlideshows(root);
 }
 
 function parseBuilderContent(content) {
@@ -853,9 +883,10 @@ function parseBuilderContent(content) {
 function blocksHtml(blocks) {
   return blocks.map((b) => {
     const fxAttr = `data-fx="${escapeHtml(b.fx || 'none')}" data-dur="${speedDur(b.speed)}"`;
+    const w = b.width === 'mid' ? ' w-mid' : b.width === 'narrow' ? ' w-narrow' : '';
     if (b.type === 'hero') {
       const btn = b.btnText ? `<a href="${escapeHtml(b.btnLink || '#')}" class="btn-pill">${escapeHtml(b.btnText)}</a>` : '';
-      return `<section class="hero-full" ${fxAttr}>
+      return `<section class="hero-full${w}" ${fxAttr}>
         <img src="${escapeHtml(b.img)}" alt="" loading="eager">
         <div class="hero-overlay">
           ${b.eyebrow ? `<p class="hero-eyebrow">${escapeHtml(b.eyebrow)}</p>` : ''}
@@ -865,13 +896,13 @@ function blocksHtml(blocks) {
       </section>`;
     }
     if (b.type === 'intro') {
-      return `<section class="intro-split" ${fxAttr}>
+      return `<section class="intro-split${w}" ${fxAttr}>
         <span class="intro-label">${escapeHtml(b.label)}</span>
         <p class="intro-text">${escapeHtml(b.text)}</p>
       </section>`;
     }
     if (b.type === 'split') {
-      return `<section class="alt-row ${b.reverse ? 'alt-reverse' : ''}" ${fxAttr}>
+      return `<section class="alt-row ${b.reverse ? 'alt-reverse' : ''}${w}" ${fxAttr}>
         <div class="alt-media"><img src="${escapeHtml(b.img)}" alt="" loading="lazy"></div>
         <div class="alt-body">
           ${b.num ? `<span class="feature-num">${escapeHtml(b.num)}</span>` : ''}
@@ -881,13 +912,13 @@ function blocksHtml(blocks) {
       </section>`;
     }
     if (b.type === 'banner') {
-      return `<section class="interstitial" ${fxAttr}>
+      return `<section class="interstitial${w}" ${fxAttr}>
         <img src="${escapeHtml(b.img)}" alt="" loading="lazy">
         <p class="interstitial-quote">${escapeHtml(b.quote)}</p>
       </section>`;
     }
     if (b.type === 'photo') {
-      return `<section class="photo-block" ${fxAttr}>
+      return `<section class="photo-block${w}" ${fxAttr}>
         <img src="${escapeHtml(b.img)}" alt="" loading="lazy">
         ${b.caption ? `<p class="photo-caption">${escapeHtml(b.caption)}</p>` : ''}
       </section>`;
@@ -895,10 +926,30 @@ function blocksHtml(blocks) {
     if (b.type === 'gallery') {
       const cells = (b.imgs || []).map((src) =>
         `<figure class="gal-item"><img src="${escapeHtml(src)}" alt="" loading="lazy"></figure>`).join('');
-      return `<section class="gallery-grid cols-${escapeHtml(b.cols || '3')}" ${fxAttr} data-fx-each="1">${cells}</section>`;
+      return `<section class="gallery-grid cols-${escapeHtml(b.cols || '3')} ratio-${escapeHtml(b.ratio || '1')}${w}" ${fxAttr} data-fx-each="1">${cells}</section>`;
+    }
+    if (b.type === 'slideshow') {
+      const slides = (b.imgs || []).map((src, i) =>
+        `<img src="${escapeHtml(src)}" alt="" class="${i === 0 ? 'active' : ''}" loading="${i === 0 ? 'eager' : 'lazy'}">`).join('');
+      return `<section class="slideshow-block h-${escapeHtml(b.height || 'm')}${w}" ${fxAttr} data-interval="${(+b.interval || 4) * 1000}">${slides}</section>`;
     }
     return '';
   }).join('');
+}
+
+/* 슬라이드쇼 자동 전환 — 라우트 바뀔 때 정리 */
+let slideTimers = [];
+function initSlideshows(root = app) {
+  root.querySelectorAll('.slideshow-block').forEach((box) => {
+    const imgs = box.querySelectorAll('img');
+    if (imgs.length < 2 || reduceMotion.matches) return;
+    let cur = 0;
+    slideTimers.push(setInterval(() => {
+      imgs[cur].classList.remove('active');
+      cur = (cur + 1) % imgs.length;
+      imgs[cur].classList.add('active');
+    }, +box.dataset.interval || 4000));
+  });
 }
 
 /* ===== 페이지: 디자인 페이지 빌더 (관리자) — isHome=true면 홈 화면 편집 ===== */
@@ -916,11 +967,13 @@ async function pageBuild(editId, isHome = false) {
   if (isHome) {
     $('#build-title').textContent = '홈 화면 편집';
     $('#build-page-title').closest('.field').hidden = true;
+    $('#build-position-field').hidden = false;
     let saved;
     try { saved = await db.getSetting('home_blocks'); } catch (e) { dbError(e); return; }
+    $('#build-position').value = saved.position === 'top' ? 'top' : 'bottom';
     blocks = Array.isArray(saved.blocks) && saved.blocks.length
       ? saved.blocks
-      : [{ type: 'hero', ...BLOCK_DEFAULTS.hero }];
+      : [{ type: 'slideshow', ...BLOCK_DEFAULTS.slideshow }];
   } else {
     if (editId) {
       try { editing = await db.getPage(editId); } catch (e) { dbError(e); return; }
@@ -960,24 +1013,52 @@ async function pageBuild(editId, isHome = false) {
       return `<div class="field"><label>사진</label>${imgField(b.img)}</div>
         <div class="field"><label>설명 문구 (선택)</label><input data-k="caption" value="${escapeHtml(b.caption)}"></div>`;
     }
-    if (b.type === 'gallery') {
+    if (b.type === 'gallery' || b.type === 'slideshow') {
       const thumbs = (b.imgs || []).map((src, gi) =>
         `<span class="gal-thumb"><img src="${escapeHtml(src)}" alt=""><button type="button" class="gal-del" data-gi="${gi}" title="빼기">×</button></span>`).join('');
-      return `<div class="field">
-          <label>사진 ${(b.imgs || []).length}장 — 여러 장 한꺼번에 선택 가능</label>
+      const photosField = `<div class="field">
+          <label>사진 ${(b.imgs || []).length}장 — 여러 장 한꺼번에 선택 가능, 무제한</label>
           <div class="gal-thumbs">${thumbs || '<span class="empty-msg">아직 사진이 없습니다.</span>'}</div>
           <div class="slot-row">
             <button type="button" class="btn-attach gal-upload">사진 추가 (여러 장 선택)</button>
             <input type="file" class="gal-file" accept="image/*" multiple hidden>
             <button type="button" class="btn-attach gal-url">URL로 추가</button>
           </div>
-        </div>
-        <div class="field"><label>한 줄에 몇 장</label>
-          <select class="slot-fx" data-k="cols">
-            <option value="2" ${b.cols === '2' ? 'selected' : ''}>2장</option>
-            <option value="3" ${b.cols === '3' || !b.cols ? 'selected' : ''}>3장</option>
-            <option value="4" ${b.cols === '4' ? 'selected' : ''}>4장</option>
-          </select>
+        </div>`;
+      if (b.type === 'slideshow') {
+        return photosField + `<div class="slot-row">
+            <label class="tool-label">전환 간격
+              <select class="slot-fx" data-k="interval">
+                <option value="2" ${b.interval === '2' ? 'selected' : ''}>2초</option>
+                <option value="3" ${b.interval === '3' ? 'selected' : ''}>3초</option>
+                <option value="4" ${b.interval === '4' || !b.interval ? 'selected' : ''}>4초</option>
+                <option value="6" ${b.interval === '6' ? 'selected' : ''}>6초</option>
+              </select>
+            </label>
+            <label class="tool-label">높이
+              <select class="slot-fx" data-k="height">
+                <option value="s" ${b.height === 's' ? 'selected' : ''}>낮게</option>
+                <option value="m" ${b.height === 'm' || !b.height ? 'selected' : ''}>보통</option>
+                <option value="l" ${b.height === 'l' ? 'selected' : ''}>높게</option>
+              </select>
+            </label>
+          </div>`;
+      }
+      return photosField + `<div class="slot-row">
+          <label class="tool-label">한 줄에
+            <select class="slot-fx" data-k="cols">
+              <option value="2" ${b.cols === '2' ? 'selected' : ''}>2장</option>
+              <option value="3" ${b.cols === '3' || !b.cols ? 'selected' : ''}>3장</option>
+              <option value="4" ${b.cols === '4' ? 'selected' : ''}>4장</option>
+            </select>
+          </label>
+          <label class="tool-label">사진 비율
+            <select class="slot-fx" data-k="ratio">
+              <option value="1" ${b.ratio === '1' || !b.ratio ? 'selected' : ''}>정사각형</option>
+              <option value="43" ${b.ratio === '43' ? 'selected' : ''}>가로 4:3</option>
+              <option value="auto" ${b.ratio === 'auto' ? 'selected' : ''}>원본 비율</option>
+            </select>
+          </label>
         </div>`;
     }
     return '';
@@ -991,6 +1072,13 @@ async function pageBuild(editId, isHome = false) {
       <label class="tool-label">속도
         <select class="slot-fx" data-k="speed">${BLOCK_SPEEDS.map((s) =>
           `<option value="${s.key}" ${(b.speed || 'normal') === s.key ? 'selected' : ''}>${s.label}</option>`).join('')}</select>
+      </label>
+      <label class="tool-label">폭
+        <select class="slot-fx" data-k="width">
+          <option value="full" ${!b.width || b.width === 'full' ? 'selected' : ''}>전체</option>
+          <option value="mid" ${b.width === 'mid' ? 'selected' : ''}>중간</option>
+          <option value="narrow" ${b.width === 'narrow' ? 'selected' : ''}>좁게</option>
+        </select>
       </label>
     </div>`;
   const imgField = (src) => `<div class="build-img-row">
@@ -1081,7 +1169,7 @@ async function pageBuild(editId, isHome = false) {
     }
     if (isHome) {
       try {
-        await db.setSetting('home_blocks', { blocks });
+        await db.setSetting('home_blocks', { blocks, position: $('#build-position').value });
         location.hash = '#/';
       } catch (e) { dbError(e); }
       return;
@@ -1147,14 +1235,25 @@ async function pageView(id) {
 async function pageSettings() {
   if (!admin.isLoggedIn()) { location.hash = '#/'; return; }
   render('tpl-settings');
-  let saved, savedFx, boardNames, posts, pages, siteFx;
+  let saved, savedFx, boardNames, posts, pages, siteFx, homeTexts;
   try {
-    [saved, savedFx, boardNames, posts, pages, siteFx] = await Promise.all([
+    [saved, savedFx, boardNames, posts, pages, siteFx, homeTexts] = await Promise.all([
       db.getSetting('site_images'), db.getSetting('board_fx'), db.getBoards(), db.getPosts(), db.getPages(),
-      db.getSetting('site_fx'),
+      db.getSetting('site_fx'), db.getSetting('home_texts'),
     ]);
   } catch (e) { dbError(e); return; }
   if (!$('#slot-list')) return;
+
+  // 기본 홈 문구
+  $('#home-text-list').innerHTML = HOME_TEXTS.map((t) => {
+    const v = homeTexts[t.key] || '';
+    return `<div class="field">
+      <label>${t.label}</label>
+      ${t.multi
+        ? `<textarea data-ht="${t.key}" rows="2" placeholder="${escapeHtml(t.def)}">${escapeHtml(v)}</textarea>`
+        : `<input data-ht="${t.key}" value="${escapeHtml(v)}" placeholder="${escapeHtml(t.def)}">`}
+    </div>`;
+  }).join('');
 
   // 홈 화면 편집 + 사이트 전역 효과
   $('#btn-edit-home').addEventListener('click', () => { location.hash = '#/homebuild'; });
@@ -1285,10 +1384,15 @@ async function pageSettings() {
     document.querySelectorAll('#site-fx-list input[data-fx]').forEach((cb) => {
       if (cb.checked) newSiteFx[cb.dataset.fx] = true;
     });
+    const newTexts = {};
+    document.querySelectorAll('#home-text-list [data-ht]').forEach((el) => {
+      if (el.value.trim()) newTexts[el.dataset.ht] = el.value.trim();
+    });
     try {
       await db.setSetting('site_images', out);
       await db.setSetting('board_fx', fxOut);
       await db.setSetting('site_fx', newSiteFx);
+      await db.setSetting('home_texts', newTexts);
       applySiteFx(newSiteFx);
       alert('저장했습니다.');
       location.hash = '#/';
@@ -1338,6 +1442,8 @@ window.addEventListener('scroll', () => {
 
 /* ===== 라우터 ===== */
 function route() {
+  slideTimers.forEach(clearInterval);
+  slideTimers = [];
   const hash = location.hash || '#/';
   const parts = hash.slice(2).split('/').map(decodeURIComponent);
   document.querySelectorAll('.main-nav a').forEach((a) => a.classList.remove('active'));
