@@ -16,6 +16,7 @@
     <a href="#/" data-nav="home">홈</a>
     <a href="#/board" data-nav="board">게시판</a>
     <a href="#/write" data-nav="write" class="btn-write admin-only" hidden>글쓰기</a>
+    <a href="#/settings" data-nav="settings" class="admin-only" hidden>설정</a>
     <a href="#" id="btn-admin" class="admin-link">관리자</a>
   </nav>
 </header>
@@ -40,7 +41,7 @@
 
 <template id="tpl-home">
   <section class="hero-full">
-    <img src="https://picsum.photos/seed/athen-hero/1920/900" alt="" loading="eager">
+    <img src="https://picsum.photos/seed/athen-hero/1920/900" alt="" loading="eager" data-slot="hero">
     <div class="hero-overlay">
       <p class="hero-eyebrow">A PERSONAL ARCHIVE</p>
       <h1>기록은 <em class="hero-em">생각</em>을<br>단단하게 만든다</h1>
@@ -54,7 +55,7 @@
   </section>
 
 <section class="alt-row">
-    <div class="alt-media"><img src="https://picsum.photos/seed/athen-write/1000/750" alt="" loading="lazy"></div>
+    <div class="alt-media"><img src="https://picsum.photos/seed/athen-write/1000/750" alt="" loading="lazy" data-slot="feature1"></div>
     <div class="alt-body">
       <span class="feature-num">01 — 기록</span>
       <h2>짧아도 좋고,<br>길어도 좋습니다</h2>
@@ -63,7 +64,7 @@
   </section>
 
   <section class="alt-row alt-reverse">
-    <div class="alt-media"><img src="https://picsum.photos/seed/athen-talk/1000/750" alt="" loading="lazy"></div>
+    <div class="alt-media"><img src="https://picsum.photos/seed/athen-talk/1000/750" alt="" loading="lazy" data-slot="feature2"></div>
     <div class="alt-body">
       <span class="feature-num">02 — 대화</span>
       <h2>사진과 함께<br>생각을 나눕니다</h2>
@@ -72,7 +73,7 @@
   </section>
 
   <section class="interstitial">
-    <img src="https://picsum.photos/seed/athen-band/1920/700" alt="" loading="lazy">
+    <img src="https://picsum.photos/seed/athen-band/1920/700" alt="" loading="lazy" data-slot="band">
     <p class="interstitial-quote">여백을 껴안고,<br>단순함 속에서 명료함을 찾다.</p>
   </section>
 
@@ -172,6 +173,18 @@
         <a href="#/board" class="btn-secondary">취소</a>
       </div>
     </form>
+  </section>
+</template>
+
+<template id="tpl-settings">
+  <section class="settings-page">
+    <h2 class="section-title">화면 설정</h2>
+    <p class="settings-note">홈 화면의 사진과 등장 효과를 변경합니다. 저장하면 바로 반영됩니다.</p>
+    <div id="slot-list"></div>
+    <div class="form-actions">
+      <button type="button" id="btn-save-settings" class="btn-primary">저장</button>
+      <button type="button" id="btn-reset-settings" class="btn-secondary">기본값으로</button>
+    </div>
   </section>
 </template>
 

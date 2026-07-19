@@ -9,7 +9,24 @@ const store = {
   setBoards: (b) => localStorage.setItem('blog_boards', JSON.stringify(b)),
   getComments: (postId) => JSON.parse(localStorage.getItem('blog_comments_' + postId) || '[]'),
   setComments: (postId, c) => localStorage.setItem('blog_comments_' + postId, JSON.stringify(c)),
+  getSiteImages: () => JSON.parse(localStorage.getItem('blog_site_images') || '{}'),
+  setSiteImages: (v) => localStorage.setItem('blog_site_images', JSON.stringify(v)),
 };
+
+/* 홈 화면 이미지 슬롯: 기본값 + 효과 목록 */
+const IMAGE_SLOTS = [
+  { key: 'hero', label: '히어로 (상단 큰 사진)', src: 'https://picsum.photos/seed/athen-hero/1920/900' },
+  { key: 'feature1', label: '01 — 기록 섹션', src: 'https://picsum.photos/seed/athen-write/1000/750' },
+  { key: 'feature2', label: '02 — 대화 섹션', src: 'https://picsum.photos/seed/athen-talk/1000/750' },
+  { key: 'band', label: '중간 배너 (인용구 배경)', src: 'https://picsum.photos/seed/athen-band/1920/700' },
+];
+const IMAGE_FX = [
+  { key: 'none', label: '없음' },
+  { key: 'fade', label: '페이드 (서서히 나타남)' },
+  { key: 'rise', label: '올라오기' },
+  { key: 'zoom', label: '줌 (커지며 선명하게)' },
+  { key: 'kenburns', label: '켄번즈 (천천히 계속 확대)' },
+];
 
 /* ===== 암호화 유틸 ===== */
 const enc = new TextEncoder();
@@ -189,9 +206,29 @@ function postCardHtml(p) {
   </a>`;
 }
 
+/* 저장된 이미지·효과를 홈 화면에 적용 */
+function applySiteImages() {
+  const saved = store.getSiteImages();
+  IMAGE_SLOTS.forEach((slot) => {
+    const img = app.querySelector(`[data-slot="${slot.key}"]`);
+    if (!img) return;
+    const conf = saved[slot.key] || {};
+    if (conf.src) img.src = conf.src;
+    const fx = conf.fx || 'none';
+    if (fx === 'none' || reduceMotion.matches) return;
+    if (fx === 'kenburns') {
+      img.classList.add('fx-kenburns');
+    } else {
+      img.classList.add('fx', 'fx-' + fx);
+      revealObserver.observe(img);
+    }
+  });
+}
+
 /* ===== 페이지: 홈 ===== */
 function pageHome() {
   render('tpl-home');
+  applySiteImages();
   const posts = store.getPosts().slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const box = $('#recent-posts');
   box.innerHTML = posts.length
@@ -553,6 +590,85 @@ function drawComments(postId) {
 }
 
 /* ===== 라우터 ===== */
+/* ===== 페이지: 화면 설정 (관리자) ===== */
+function pageSettings() {
+  if (!admin.isLoggedIn()) { location.hash = '#/'; return; }
+  render('tpl-settings');
+  const saved = store.getSiteImages();
+  const draft = {};
+  IMAGE_SLOTS.forEach((s) => {
+    draft[s.key] = { src: saved[s.key]?.src || '', fx: saved[s.key]?.fx || 'none' };
+  });
+
+  $('#slot-list').innerHTML = IMAGE_SLOTS.map((s) => {
+    const conf = draft[s.key];
+    const options = IMAGE_FX.map((f) =>
+      `<option value="${f.key}" ${conf.fx === f.key ? 'selected' : ''}>${f.label}</option>`).join('');
+    return `<div class="slot-card" data-key="${s.key}">
+      <div class="slot-preview"><img src="${conf.src || s.src}" alt=""></div>
+      <div class="slot-fields">
+        <h3>${s.label}</h3>
+        <div class="field">
+          <label>이미지 URL (비우면 기본 사진)</label>
+          <input type="url" class="slot-url" value="${escapeHtml(conf.src)}" placeholder="${s.src}">
+        </div>
+        <div class="slot-row">
+          <button type="button" class="btn-attach slot-upload">파일 업로드</button>
+          <input type="file" class="slot-file" accept="image/*" hidden>
+          <select class="slot-fx">${options}</select>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  $('#slot-list').addEventListener('click', (e) => {
+    const card = e.target.closest('.slot-card');
+    if (!card) return;
+    if (e.target.closest('.slot-upload')) card.querySelector('.slot-file').click();
+  });
+  $('#slot-list').addEventListener('change', async (e) => {
+    const card = e.target.closest('.slot-card');
+    if (!card) return;
+    const key = card.dataset.key;
+    if (e.target.classList.contains('slot-file') && e.target.files[0]) {
+      try {
+        const dataUrl = await compressImage(e.target.files[0], 1600, 0.8);
+        draft[key].src = dataUrl;
+        card.querySelector('.slot-url').value = '';
+        card.querySelector('.slot-preview img').src = dataUrl;
+      } catch { alert('이미지 파일인지 확인하세요.'); }
+      e.target.value = '';
+    } else if (e.target.classList.contains('slot-url')) {
+      draft[key].src = e.target.value.trim();
+      const def = IMAGE_SLOTS.find((s) => s.key === key).src;
+      card.querySelector('.slot-preview img').src = draft[key].src || def;
+    } else if (e.target.classList.contains('slot-fx')) {
+      draft[key].fx = e.target.value;
+    }
+  });
+
+  $('#btn-save-settings').addEventListener('click', () => {
+    const out = {};
+    IMAGE_SLOTS.forEach((s) => {
+      const d = draft[s.key];
+      if (d.src || d.fx !== 'none') out[s.key] = d;
+    });
+    try {
+      store.setSiteImages(out);
+      alert('저장했습니다.');
+      location.hash = '#/';
+    } catch {
+      alert('저장 공간이 부족합니다. 업로드 대신 이미지 URL을 사용해 보세요.');
+    }
+  });
+  $('#btn-reset-settings').addEventListener('click', () => {
+    if (!confirm('모든 사진과 효과를 기본값으로 되돌릴까요?')) return;
+    localStorage.removeItem('blog_site_images');
+    alert('기본값으로 되돌렸습니다.');
+    location.hash = '#/';
+  });
+}
+
 function route() {
   const hash = location.hash || '#/';
   const parts = hash.slice(2).split('/').map(decodeURIComponent);
@@ -566,6 +682,9 @@ function route() {
     pageWrite(parts[1] || null);
   } else if (parts[0] === 'post') {
     pagePost(parts[1]);
+  } else if (parts[0] === 'settings') {
+    $('[data-nav="settings"]')?.classList.add('active');
+    pageSettings();
   } else {
     $('[data-nav="home"]').classList.add('active');
     pageHome();

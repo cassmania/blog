@@ -26,8 +26,22 @@ button, [role="button"], a { cursor: pointer; }
   transition: opacity 0.42s cubic-bezier(0.16, 1, 0.3, 1), transform 0.42s cubic-bezier(0.16, 1, 0.3, 1);
   transition-delay: var(--reveal-delay, 0ms);
 }
+/* 이미지 등장 효과 (설정 페이지에서 선택) */
+#app .fx { transition: opacity 0.7s ease, transform 0.9s cubic-bezier(0.16, 1, 0.3, 1); }
+.fx-fade { opacity: 0; }
+.fx-rise { opacity: 0; transform: translateY(32px); }
+.fx-zoom { opacity: 0; transform: scale(1.08); }
+.fx.in-view { opacity: 1; transform: none; }
+.fx-kenburns { animation: kenburns 22s ease-out both; }
+@keyframes kenburns {
+  from { transform: scale(1); }
+  to { transform: scale(1.12); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .reveal { opacity: 1; transform: none; }
+  .fx { opacity: 1; transform: none; }
+  .fx-kenburns { animation: none; }
   * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
 
@@ -226,6 +240,31 @@ main { max-width: var(--container); margin: 0 auto; padding: 0 24px 120px; }
 .pillar h3 { font-size: 0.98rem; font-weight: 700; margin: 12px 0 8px; }
 .pillar p { color: var(--ink-soft); font-size: 0.85rem; line-height: 1.6; }
 
+
+/* ===== 화면 설정 페이지 ===== */
+.settings-page { max-width: 760px; margin: 0 auto; padding-top: 48px; }
+.settings-note { color: var(--ink-faint); font-size: 0.9rem; margin: 10px 0 32px; }
+.slot-card {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 22px;
+  padding: 22px 0;
+  border-top: 1px solid var(--line);
+  align-items: start;
+}
+.slot-preview { border-radius: 10px; overflow: hidden; background: var(--line); }
+.slot-preview img { width: 100%; aspect-ratio: 4/3; object-fit: cover; }
+.slot-fields h3 { font-family: var(--serif); font-size: 1.05rem; margin-bottom: 12px; }
+.slot-fields .field { margin-bottom: 12px; }
+.slot-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.slot-fx {
+  padding: 9px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  font-family: var(--sans);
+  font-size: 0.88rem;
+}
 
 /* ===== Feature section ===== */
 .feature-section { padding: 70px 0 30px; }
@@ -761,6 +800,7 @@ main { max-width: var(--container); margin: 0 auto; padding: 0 24px 120px; }
   .alt-reverse .alt-media { order: 1; }
   .alt-reverse .alt-body { order: 2; }
   .pillar-strip { grid-template-columns: 1fr; padding: 56px 0 20px; gap: 24px; }
+  .slot-card { grid-template-columns: 1fr; gap: 14px; }
 .post-view { padding-top: 36px; }
   .post-meta { flex-wrap: wrap; gap: 8px; }
   .comment-form-left { gap: 10px; flex-wrap: wrap; }
