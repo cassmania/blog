@@ -293,7 +293,8 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const revealObserver = new IntersectionObserver((entries) => {
   entries.forEach((en) => {
     if (en.isIntersecting) {
-      en.target.classList.add('in-view');
+      // rAF: 숨김 상태가 먼저 페인트된 뒤 전환 시작 — 즉시 붙이면 애니메이션이 스킵됨
+      requestAnimationFrame(() => en.target.classList.add('in-view'));
       revealObserver.unobserve(en.target);
     }
   });
@@ -301,10 +302,11 @@ const revealObserver = new IntersectionObserver((entries) => {
 
 /* 관찰 + 안전장치: 이미 화면 안이면 타이머로도 in-view 부여 (IO 미발화 환경 대비) */
 function safeObserve(el) {
+  void el.offsetWidth; // 리플로 강제 — 초기 숨김 상태를 확정해 전환이 반드시 재생되게
   revealObserver.observe(el);
   const r = el.getBoundingClientRect();
   if (r.top < innerHeight && r.bottom > 0) {
-    setTimeout(() => el.classList.add('in-view'), 400);
+    setTimeout(() => el.classList.add('in-view'), 450);
   }
 }
 
@@ -366,14 +368,11 @@ async function pageHome() {
     const [posts, images, pages, home] = await Promise.all([
       db.getPosts(), db.getSetting('site_images'), db.getPages(), db.getSetting('home_blocks'),
     ]);
+    applySiteImages(images);
     if (Array.isArray(home.blocks) && home.blocks.length) {
-      // 관리자가 조립한 홈: 기본 디자인 섹션을 블록으로 교체 (최근 글·페이지 목록은 유지)
-      app.querySelectorAll('.hero-full, .intro-split, .alt-row, .interstitial, .pillar-strip')
-        .forEach((el) => el.remove());
+      // 조립한 블록은 기본 홈 아래에 추가 (기존 화면 유지)
       $('#custom-pages-section').insertAdjacentHTML('beforebegin', blocksHtml(home.blocks));
       applyBlockFx();
-    } else {
-      applySiteImages(images);
     }
     const box = $('#recent-posts');
     if (!box) return; // 페이지 이동됨
@@ -800,8 +799,9 @@ const BLOCK_DEFAULTS = {
   split: { img: 'https://picsum.photos/seed/build-split/1000/750', num: '01 — 소제목', title: '제목을 입력하세요', body: '내용을 입력하세요.', reverse: false, fx: 'rise', speed: 'normal' },
   banner: { img: 'https://picsum.photos/seed/build-band/1920/700', quote: '인용구를 입력하세요.', fx: 'fade', speed: 'normal' },
   photo: { img: 'https://picsum.photos/seed/build-photo/1600/900', caption: '', fx: 'fade', speed: 'normal' },
+  gallery: { imgs: [], cols: '3', fx: 'fade', speed: 'normal' },
 };
-const BLOCK_NAMES = { hero: '히어로', intro: '소개 문단', split: '이미지 + 글', banner: '인용 배너', photo: '사진' };
+const BLOCK_NAMES = { hero: '히어로', intro: '소개 문단', split: '이미지 + 글', banner: '인용 배너', photo: '사진', gallery: '사진 갤러리' };
 
 /* 블록 등장 효과 + 속도 */
 const BLOCK_FX = [
@@ -830,9 +830,14 @@ function applyBlockFx(root = app) {
     el.classList.add('no-reveal'); // 기본 리빌 대신 블록 자체 효과
     const fx = el.dataset.fx;
     if (fx === 'none' || reduceMotion.matches) return;
-    el.classList.add('fxi', 'fxi-' + fx);
-    el.style.setProperty('--fx-dur', el.dataset.dur || '0.65s');
-    safeObserve(el);
+    // 갤러리: 사진 한 장씩 순차 등장, 나머지: 블록 통째로
+    const targets = el.dataset.fxEach ? [...el.children] : [el];
+    targets.forEach((t, i) => {
+      t.classList.add('fxi', 'fxi-' + fx);
+      t.style.setProperty('--fx-dur', el.dataset.dur || '0.65s');
+      if (el.dataset.fxEach) t.style.setProperty('--fxi-delay', `${Math.min(i, 12) * 70}ms`);
+      safeObserve(t);
+    });
   });
 }
 
@@ -886,6 +891,11 @@ function blocksHtml(blocks) {
         <img src="${escapeHtml(b.img)}" alt="" loading="lazy">
         ${b.caption ? `<p class="photo-caption">${escapeHtml(b.caption)}</p>` : ''}
       </section>`;
+    }
+    if (b.type === 'gallery') {
+      const cells = (b.imgs || []).map((src) =>
+        `<figure class="gal-item"><img src="${escapeHtml(src)}" alt="" loading="lazy"></figure>`).join('');
+      return `<section class="gallery-grid cols-${escapeHtml(b.cols || '3')}" ${fxAttr} data-fx-each="1">${cells}</section>`;
     }
     return '';
   }).join('');
@@ -950,6 +960,26 @@ async function pageBuild(editId, isHome = false) {
       return `<div class="field"><label>사진</label>${imgField(b.img)}</div>
         <div class="field"><label>설명 문구 (선택)</label><input data-k="caption" value="${escapeHtml(b.caption)}"></div>`;
     }
+    if (b.type === 'gallery') {
+      const thumbs = (b.imgs || []).map((src, gi) =>
+        `<span class="gal-thumb"><img src="${escapeHtml(src)}" alt=""><button type="button" class="gal-del" data-gi="${gi}" title="빼기">×</button></span>`).join('');
+      return `<div class="field">
+          <label>사진 ${(b.imgs || []).length}장 — 여러 장 한꺼번에 선택 가능</label>
+          <div class="gal-thumbs">${thumbs || '<span class="empty-msg">아직 사진이 없습니다.</span>'}</div>
+          <div class="slot-row">
+            <button type="button" class="btn-attach gal-upload">사진 추가 (여러 장 선택)</button>
+            <input type="file" class="gal-file" accept="image/*" multiple hidden>
+            <button type="button" class="btn-attach gal-url">URL로 추가</button>
+          </div>
+        </div>
+        <div class="field"><label>한 줄에 몇 장</label>
+          <select class="slot-fx" data-k="cols">
+            <option value="2" ${b.cols === '2' ? 'selected' : ''}>2장</option>
+            <option value="3" ${b.cols === '3' || !b.cols ? 'selected' : ''}>3장</option>
+            <option value="4" ${b.cols === '4' ? 'selected' : ''}>4장</option>
+          </select>
+        </div>`;
+    }
     return '';
   };
   // 모든 블록 공통: 등장 효과 + 속도
@@ -1003,17 +1033,36 @@ async function pageBuild(editId, isHome = false) {
     if (e.target.closest('.block-up') && i > 0) { [blocks[i - 1], blocks[i]] = [blocks[i], blocks[i - 1]]; drawBlocks(); return; }
     if (e.target.closest('.block-down') && i < blocks.length - 1) { [blocks[i + 1], blocks[i]] = [blocks[i], blocks[i + 1]]; drawBlocks(); return; }
     if (e.target.closest('.build-upload')) card.querySelector('.build-file').click();
+    if (e.target.closest('.gal-upload')) card.querySelector('.gal-file').click();
+    const galDel = e.target.closest('.gal-del');
+    if (galDel) { blocks[i].imgs.splice(+galDel.dataset.gi, 1); drawBlocks(); return; }
+    if (e.target.closest('.gal-url')) {
+      const url = prompt('사진 URL을 입력하세요');
+      if (url && url.trim()) { blocks[i].imgs.push(url.trim()); drawBlocks(); }
+    }
   });
   $('#block-list').addEventListener('change', async (e) => {
-    if (!e.target.classList.contains('build-file') || !e.target.files[0]) return;
     const card = e.target.closest('.block-card');
-    try {
-      const dataUrl = await compressImage(e.target.files[0], 1600, 0.8);
-      blocks[+card.dataset.i].img = dataUrl;
-      card.querySelector('.build-img-preview').src = dataUrl;
-      card.querySelector('input[data-k="img"]').value = '';
-    } catch { alert('이미지 파일인지 확인하세요.'); }
-    e.target.value = '';
+    if (!card) return;
+    if (e.target.classList.contains('build-file') && e.target.files[0]) {
+      try {
+        const dataUrl = await compressImage(e.target.files[0], 1600, 0.8);
+        blocks[+card.dataset.i].img = dataUrl;
+        card.querySelector('.build-img-preview').src = dataUrl;
+        card.querySelector('input[data-k="img"]').value = '';
+      } catch { alert('이미지 파일인지 확인하세요.'); }
+      e.target.value = '';
+    } else if (e.target.classList.contains('gal-file') && e.target.files.length) {
+      // 갤러리: 여러 장 한꺼번에 압축해 추가
+      const b = blocks[+card.dataset.i];
+      let fail = 0;
+      for (const file of e.target.files) {
+        try { b.imgs.push(await compressImage(file, 1200, 0.75)); } catch { fail++; }
+      }
+      if (fail) alert(`${fail}장은 이미지 파일이 아니라 건너뛰었습니다.`);
+      e.target.value = '';
+      drawBlocks();
+    }
   });
 
   $('.block-add-bar').addEventListener('click', (e) => {
@@ -1026,6 +1075,10 @@ async function pageBuild(editId, isHome = false) {
 
   $('#btn-save-build').addEventListener('click', async () => {
     if (!blocks.length) { alert('블록을 하나 이상 추가하세요.'); return; }
+    if (JSON.stringify(blocks).length > 8_000_000) {
+      alert('사진 용량이 너무 큽니다. 업로드 대신 이미지 URL을 쓰거나 사진 수를 줄이세요.');
+      return;
+    }
     if (isHome) {
       try {
         await db.setSetting('home_blocks', { blocks });
