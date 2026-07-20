@@ -80,6 +80,65 @@ body.fx-hover .photo-block img:hover { transform: scale(1.04); }
 body.fx-parallax .hero-full > img,
 body.fx-parallax .interstitial > img { will-change: transform; }
 
+/* 홈 꾸미기 모드 (드래그 배치·크기 조절) */
+.home-editing [data-bid] {
+  position: relative;
+  outline: 2px dashed var(--rose);
+  outline-offset: 4px;
+}
+.home-editing [data-bid].eh-dragging { opacity: 0.45; }
+.eh-grip {
+  position: absolute;
+  top: 8px; left: 50%;
+  transform: translateX(-50%);
+  background: var(--rose);
+  color: #fff;
+  font-size: 12px;
+  padding: 5px 14px;
+  border-radius: 999px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  z-index: 5;
+}
+.eh-grip:active { cursor: grabbing; }
+.eh-resize {
+  position: absolute;
+  right: 2px; bottom: 2px;
+  width: 22px; height: 22px;
+  background: var(--rose);
+  border: 2px solid #fff;
+  border-radius: 5px;
+  cursor: nwse-resize;
+  touch-action: none;
+  z-index: 5;
+}
+#drop-line {
+  height: 4px;
+  background: var(--rose);
+  border-radius: 2px;
+  margin: 6px 0;
+}
+#home-edit-bar {
+  position: fixed;
+  left: 50%; bottom: 18px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--ink);
+  color: #fff;
+  padding: 12px 20px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  z-index: 120;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+  max-width: calc(100vw - 32px);
+}
+#home-edit-bar .btn-primary { padding: 8px 20px; }
+#home-edit-bar .btn-secondary { color: #fff; }
+.w-pct { margin-left: auto; margin-right: auto; }
+
 /* 블록 크기·정렬 옵션 */
 .w-70 { max-width: 70%; margin-left: auto; margin-right: auto; }
 .w-50 { max-width: 50%; margin-left: auto; margin-right: auto; }

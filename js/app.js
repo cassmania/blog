@@ -390,16 +390,20 @@ function applySiteImages(saved) {
 
 /* ===== 페이지: 홈 ===== */
 async function pageHome() {
+  const nav = navToken;
   render('tpl-home');
   try {
     const [posts, images, pages, home, texts] = await Promise.all([
       db.getPosts(), db.getSetting('site_images'), db.getPages(), db.getSetting('home_blocks'),
       db.getSetting('home_texts'),
     ]);
+    if (nav !== navToken) return; // 이동 중 다른 라우트로 바뀜 — 낡은 렌더 중단
     applySiteImages(images);
     applyHomeTexts(texts);
     if (Array.isArray(home.blocks) && home.blocks.length) {
       // 블록별 배치 위치(anchor)에 따라 기본 화면 사이사이에 삽입
+      home.blocks.forEach((b, i) => { b.__bid = i; });
+      lastHomeBlocks = home.blocks;
       const legacyAnchor = home.position === 'top' ? 'top' : 'end';
       const groups = {};
       home.blocks.forEach((b) => {
@@ -907,12 +911,20 @@ const HOME_ANCHORS = [
   { key: 'bottom', label: '맨 아래 (최근 글 아래)' },
 ];
 
-/* 블록 폭·정렬 클래스 (구버전 full/mid/narrow 값도 처리) */
+/* 블록 폭·정렬 (구버전 full/mid/narrow + 드래그 리사이즈의 임의 % 값 지원) */
 function sizeCls(b) {
   const map = { full: '', 100: '', mid: ' w-70', 70: ' w-70', narrow: ' w-50', 50: ' w-50', 35: ' w-35' };
-  const w = map[b.width] ?? '';
+  let w = map[b.width];
+  if (w === undefined) w = /^\d+$/.test(b.width) ? ' w-pct' : '';
   const al = b.align === 'left' ? ' al-left' : b.align === 'right' ? ' al-right' : '';
   return w + al;
+}
+function sizeStyle(b) {
+  const known = ['full', '100', 'mid', '70', 'narrow', '50', '35'];
+  if (b.width && /^\d+$/.test(b.width) && !known.includes(String(b.width))) {
+    return ` style="max-width:${Math.max(20, Math.min(100, +b.width))}%"`;
+  }
+  return '';
 }
 
 /* 렌더된 블록에 선택한 효과 적용 */
@@ -944,7 +956,8 @@ function parseBuilderContent(content) {
 /* 블록 배열 → 메인 화면과 동일한 마크업 */
 function blocksHtml(blocks) {
   return blocks.map((b) => {
-    const fxAttr = `data-fx="${escapeHtml(b.fx || 'none')}" data-dur="${speedDur(b.speed)}"`;
+    const bid = b.__bid !== undefined ? ` data-bid="${b.__bid}"` : '';
+    const fxAttr = `data-fx="${escapeHtml(b.fx || 'none')}" data-dur="${speedDur(b.speed)}"${bid}${sizeStyle(b)}`;
     const w = sizeCls(b);
     if (b.type === 'hero') {
       const btn = b.btnText ? `<a href="${escapeHtml(b.btnLink || '#')}" class="btn-pill">${escapeHtml(b.btnText)}</a>` : '';
@@ -1352,6 +1365,7 @@ async function pageSettings() {
     : '<p class="empty-msg">아직 페이지가 없습니다.</p>';
   $('#btn-new-page').addEventListener('click', () => { location.hash = '#/pagewrite'; });
   $('#btn-new-build').addEventListener('click', () => { location.hash = '#/pagebuild'; });
+  $('#btn-arrange-home').addEventListener('click', () => { location.hash = '#/homeedit'; });
   $('#page-manage-list').addEventListener('click', async (e) => {
     const btn = e.target.closest('.btn-del-page');
     if (!btn) return;
@@ -1484,6 +1498,132 @@ async function pageSettings() {
   });
 }
 
+/* ===== 홈 꾸미기 모드: 드래그 배치 + 모서리 크기 조절 ===== */
+let lastHomeBlocks = [];
+
+async function pageHomeEdit() {
+  if (!admin.isLoggedIn()) {
+    const ok = await admin.login();
+    applyAdminUI();
+    if (!ok) { location.hash = '#/'; return; }
+  }
+  await pageHome();
+  if (!location.hash.startsWith('#/homeedit')) return;
+  if (!lastHomeBlocks.length) {
+    alert('배치할 블록이 없습니다. 설정 → 홈 화면 편집에서 먼저 블록을 추가하세요.');
+    location.hash = '#/settings';
+    return;
+  }
+  document.body.classList.add('home-editing');
+  // bid → 블록 고정 매핑 (드래그로 배열 순서가 바뀌어도 안전)
+  const blockByBid = {};
+  lastHomeBlocks.forEach((b) => { blockByBid[b.__bid] = b; });
+  // 편집 중엔 등장 효과 전부 표시 상태로
+  app.querySelectorAll('.fxi').forEach((el) => el.classList.add('in-view'));
+
+  // 블록마다 이동 그립 + 크기 조절 핸들
+  app.querySelectorAll('[data-bid]').forEach((el) => {
+    el.insertAdjacentHTML('beforeend',
+      '<div class="eh-grip" title="끌어서 위치 이동">⠿ 끌어서 이동</div><div class="eh-resize" title="끌어서 크기 조절"></div>');
+  });
+
+  const dropLine = document.createElement('div');
+  dropLine.id = 'drop-line';
+  const bar = document.createElement('div');
+  bar.id = 'home-edit-bar';
+  bar.innerHTML = '<span>블록을 끌어 위치 이동 · 오른쪽 아래 모서리를 끌어 크기 조절</span>' +
+    '<button type="button" class="btn-primary" id="eh-save">저장</button>' +
+    '<a href="#/" class="btn-secondary">취소</a>';
+  document.body.appendChild(bar);
+
+  // 화면 배치 순서 → 블록의 anchor·순서로 역산
+  const rebuildFromDom = () => {
+    let anchor = 'top';
+    const order = [];
+    [...app.children].forEach((el) => {
+      if (el.dataset.bid !== undefined) {
+        const b = blockByBid[el.dataset.bid];
+        if (b) { b.anchor = anchor; order.push(b); }
+        return;
+      }
+      if (el.matches('.hero-full')) anchor = 'hero';
+      else if (el.matches('.intro-split')) anchor = 'intro';
+      else if (el.matches('.alt-row:not(.alt-reverse)')) anchor = 'f1';
+      else if (el.matches('.alt-reverse')) anchor = 'f2';
+      else if (el.matches('.interstitial')) anchor = 'banner';
+      else if (el.matches('.pillar-strip')) anchor = 'end';
+      else if (el.id === 'custom-pages-section' || el.matches('.post-section')) anchor = 'bottom';
+    });
+    lastHomeBlocks = order;
+  };
+
+  let dragEl = null;
+  const insertionRef = (y) => {
+    for (const k of [...app.children]) {
+      if (k === dragEl || k.id === 'drop-line') continue;
+      const r = k.getBoundingClientRect();
+      if (y < r.top + r.height / 2) return k;
+    }
+    return null;
+  };
+  const onDragMove = (e) => {
+    e.preventDefault();
+    app.insertBefore(dropLine, insertionRef(e.clientY));
+  };
+  const onDragUp = () => {
+    window.removeEventListener('pointermove', onDragMove);
+    if (dropLine.parentElement) app.insertBefore(dragEl, dropLine);
+    dropLine.remove();
+    dragEl.classList.remove('eh-dragging');
+    dragEl = null;
+    rebuildFromDom();
+  };
+
+  const onResizeDown = (e, el) => {
+    e.preventDefault();
+    e.stopPropagation();
+    el.classList.remove('w-70', 'w-50', 'w-35', 'w-mid', 'w-narrow');
+    el.classList.add('w-pct');
+    const parentW = app.clientWidth;
+    const startW = el.getBoundingClientRect().width;
+    const startX = e.clientX;
+    const move = (ev) => {
+      const pct = Math.max(20, Math.min(100, ((startW + (ev.clientX - startX)) / parentW) * 100));
+      el.style.maxWidth = pct + '%';
+      el.dataset.pct = Math.round(pct);
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      const b = blockByBid[el.dataset.bid];
+      if (b && el.dataset.pct) b.width = String(el.dataset.pct);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up, { once: true });
+  };
+
+  app.addEventListener('pointerdown', (e) => {
+    const grip = e.target.closest('.eh-grip');
+    const rez = e.target.closest('.eh-resize');
+    if (grip) {
+      e.preventDefault();
+      dragEl = grip.closest('[data-bid]');
+      dragEl.classList.add('eh-dragging');
+      window.addEventListener('pointermove', onDragMove);
+      window.addEventListener('pointerup', onDragUp, { once: true });
+    } else if (rez) {
+      onResizeDown(e, rez.closest('[data-bid]'));
+    }
+  });
+
+  $('#eh-save').addEventListener('click', async () => {
+    const clean = lastHomeBlocks.map((b) => { const c = { ...b }; delete c.__bid; return c; });
+    try {
+      await db.setSetting('home_blocks', { blocks: clean });
+      location.hash = '#/';
+    } catch (e) { dbError(e); }
+  });
+}
+
 /* ===== 사이트 전역 효과 (호버·패럴랙스·스무스·프로그레스) ===== */
 function applySiteFx(conf) {
   document.documentElement.classList.toggle('fx-smooth', !!conf.smooth);
@@ -1517,9 +1657,14 @@ window.addEventListener('scroll', () => {
 }, { passive: true });
 
 /* ===== 라우터 ===== */
+let navToken = 0;
 function route() {
+  navToken++;
   slideTimers.forEach(clearInterval);
   slideTimers = [];
+  document.body.classList.remove('home-editing');
+  $('#home-edit-bar')?.remove();
+  $('#drop-line')?.remove();
   const hash = location.hash || '#/';
   const parts = hash.slice(2).split('/').map(decodeURIComponent);
   document.querySelectorAll('.main-nav a').forEach((a) => a.classList.remove('active'));
@@ -1540,6 +1685,8 @@ function route() {
     pageBuild(parts[1] || null);
   } else if (parts[0] === 'homebuild') {
     pageBuild(null, true);
+  } else if (parts[0] === 'homeedit') {
+    pageHomeEdit();
   } else if (parts[0] === 'settings') {
     $('[data-nav="settings"]')?.classList.add('active');
     pageSettings();
