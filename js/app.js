@@ -2,7 +2,7 @@
    글·댓글·게시판·설정 전부 Supabase DB 저장 — 모든 방문자가 같은 내용을 봄.
    비밀댓글: Web Crypto AES-GCM 암호화. 관리자: Supabase Auth 이메일 로그인. */
 
-const APP_VERSION = '15';
+const APP_VERSION = '16';
 const SUPABASE_URL = 'https://uarrnlbgowejwulzixqm.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_dsijIbtDJOt8LFGS90lMuA_d_OEHVuO';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -425,6 +425,21 @@ async function pageHome() {
       });
       applyBlockFx();
     }
+    // 저장된 전체 배치 순서(마우스 배치 저장분)가 있으면 그 순서대로 재배열
+    if (Array.isArray(home.layout) && home.layout.length) {
+      const pickMap = {
+        hero: '.hero-full:not([data-bid])', intro: '.intro-split:not([data-bid])',
+        f1: '.alt-row:not(.alt-reverse):not([data-bid])', f2: '.alt-reverse:not([data-bid])',
+        banner: '.interstitial:not([data-bid])', pillar: '.pillar-strip',
+      };
+      const ref = $('#custom-pages-section');
+      home.layout.forEach((tok) => {
+        const el = tok.startsWith('b:')
+          ? app.querySelector(`[data-bid="${CSS.escape(tok.slice(2))}"]`)
+          : app.querySelector(pickMap[tok.slice(2)] || 'noop');
+        if (el) app.insertBefore(el, ref);
+      });
+    }
     const box = $('#recent-posts');
     if (!box) return; // 페이지 이동됨
     box.innerHTML = posts.length
@@ -628,10 +643,16 @@ async function pageWrite(editId, isPage = false) {
       document.execCommand('insertImage', false, text);
       return;
     }
-    // 확장자 없음: 이미지로 로드되면 삽입, 아니면 링크 텍스트로
+    // 확장자 없음: 이미지로 로드되면 삽입 → 실패 시 프록시로 재시도 → 그래도 실패면 텍스트
+    const proxied = 'https://images.weserv.nl/?url=' + encodeURIComponent(text);
     const probe = new Image();
     probe.onload = () => { editor.focus(); document.execCommand('insertImage', false, text); };
-    probe.onerror = () => { editor.focus(); document.execCommand('insertText', false, text); };
+    probe.onerror = () => {
+      const p2 = new Image();
+      p2.onload = () => { editor.focus(); document.execCommand('insertImage', false, proxied); };
+      p2.onerror = () => { editor.focus(); document.execCommand('insertText', false, text); };
+      p2.src = proxied;
+    };
     probe.src = text;
   });
 
@@ -1520,6 +1541,7 @@ async function pageSettings() {
 
 /* ===== 홈 꾸미기 모드: 드래그 배치 + 모서리 크기 조절 ===== */
 let lastHomeBlocks = [];
+let homeSortable = null;
 
 async function pageHomeEdit() {
   if (!admin.isLoggedIn()) {
@@ -1547,9 +1569,18 @@ async function pageHomeEdit() {
       '<div class="eh-h eh-nw" data-dir="nw"></div><div class="eh-h eh-ne" data-dir="ne"></div>' +
       '<div class="eh-h eh-sw" data-dir="sw"></div><div class="eh-h eh-se" data-dir="se"></div>');
   });
+  // 기본 섹션들도 드래그 대상으로 — 홈 전체를 자유 배치
+  const DEFAULT_SECTIONS = [
+    ['.hero-full:not([data-bid])', 'hero'], ['.intro-split:not([data-bid])', 'intro'],
+    ['.alt-row:not(.alt-reverse):not([data-bid])', 'f1'], ['.alt-reverse:not([data-bid])', 'f2'],
+    ['.interstitial:not([data-bid])', 'banner'], ['.pillar-strip', 'pillar'],
+  ];
+  DEFAULT_SECTIONS.forEach(([sel, key]) => {
+    const el = app.querySelector(sel);
+    if (el) { el.classList.add('hm-item'); el.dataset.dkey = key; }
+  });
+  app.querySelectorAll('[data-bid]').forEach((el) => el.classList.add('hm-item'));
 
-  const dropLine = document.createElement('div');
-  dropLine.id = 'drop-line';
   const bar = document.createElement('div');
   bar.id = 'home-edit-bar';
   bar.innerHTML = '<button type="button" class="btn-primary" id="eh-save">저장</button>' +
@@ -1558,64 +1589,37 @@ async function pageHomeEdit() {
 
   // 편집 중엔 블록 안 링크 클릭·이미지 기본 드래그 차단
   app.addEventListener('click', (e) => {
-    if (document.body.classList.contains('home-editing') && e.target.closest('[data-bid] a')) e.preventDefault();
+    if (document.body.classList.contains('home-editing') && e.target.closest('.hm-item a')) e.preventDefault();
   }, true);
   app.addEventListener('dragstart', (e) => {
     if (document.body.classList.contains('home-editing')) e.preventDefault();
   });
 
-  // 화면 배치 순서 → 블록의 anchor·순서로 역산
-  const rebuildFromDom = () => {
-    let anchor = 'top';
-    const order = [];
-    [...app.children].forEach((el) => {
-      if (el.dataset.bid !== undefined) {
-        const b = blockByBid[el.dataset.bid];
-        if (b) { b.anchor = anchor; order.push(b); }
-        return;
-      }
-      if (el.matches('.hero-full')) anchor = 'hero';
-      else if (el.matches('.intro-split')) anchor = 'intro';
-      else if (el.matches('.alt-row:not(.alt-reverse)')) anchor = 'f1';
-      else if (el.matches('.alt-reverse')) anchor = 'f2';
-      else if (el.matches('.interstitial')) anchor = 'banner';
-      else if (el.matches('.pillar-strip')) anchor = 'end';
-      else if (el.id === 'custom-pages-section' || el.matches('.post-section')) anchor = 'bottom';
-    });
-    lastHomeBlocks = order;
+  // 화면 배치 순서 → 저장용 레이아웃 토큰 (기본 섹션 + 블록 전부)
+  const buildLayout = () => {
+    const out = [];
+    for (const el of [...app.children]) {
+      if (el.id === 'custom-pages-section') break;
+      if (el.dataset.bid !== undefined) out.push('b:' + el.dataset.bid);
+      else if (el.dataset.dkey) out.push('d:' + el.dataset.dkey);
+    }
+    return out;
   };
 
-  let dragEl = null;
-  let lastY = 0;
-  const insertionRef = (y) => {
-    for (const k of [...app.children]) {
-      if (k === dragEl || k.id === 'drop-line') continue;
-      const r = k.getBoundingClientRect();
-      if (y < r.top + r.height / 2) return k;
-    }
-    return null;
-  };
-  // 드래그 중 화면 가장자리 근처면 자동 스크롤 + 드롭 라인 갱신
-  const dragTick = () => {
-    if (!dragEl) return;
-    if (lastY < 100) window.scrollBy({ top: -24, behavior: 'instant' });
-    else if (lastY > innerHeight - 100) window.scrollBy({ top: 24, behavior: 'instant' });
-    app.insertBefore(dropLine, insertionRef(lastY));
-    requestAnimationFrame(dragTick);
-  };
-  const onDragMove = (e) => {
-    e.preventDefault();
-    lastY = e.clientY;
-    app.insertBefore(dropLine, insertionRef(lastY)); // 즉시 갱신 (rAF 지연 보완)
-  };
-  const onDragUp = () => {
-    window.removeEventListener('pointermove', onDragMove);
-    if (dropLine.parentElement) app.insertBefore(dragEl, dropLine);
-    dropLine.remove();
-    dragEl.classList.remove('eh-dragging');
-    dragEl = null;
-    rebuildFromDom();
-  };
+  // 드래그 이동: SortableJS — 기본 섹션 포함 홈 전체 자유 배치
+  homeSortable = new Sortable(app, {
+    draggable: '.hm-item',
+    filter: '.eh-h',
+    preventOnFilter: false,
+    animation: 180,
+    ghostClass: 'eh-ghost',
+    chosenClass: 'eh-dragging',
+    scroll: true,
+    scrollSensitivity: 110,
+    scrollSpeed: 18,
+    forceFallback: true, // HTML5 DnD 대신 포인터 기반 — 브라우저 편차 제거
+    fallbackTolerance: 4,
+  });
 
   // 4모서리 크기 조절: 어느 모서리든 바깥으로 끌면 커지고 안쪽으로 끌면 작아짐
   const onResizeDown = (e, el, dir) => {
@@ -1644,26 +1648,14 @@ async function pageHomeEdit() {
   app.addEventListener('pointerdown', (e) => {
     if (!document.body.classList.contains('home-editing')) return;
     const handle = e.target.closest('.eh-h');
-    if (handle) {
-      onResizeDown(e, handle.closest('[data-bid]'), handle.dataset.dir);
-      return;
-    }
-    const block = e.target.closest('[data-bid]');
-    if (!block || e.target.closest('a, button, input, select, textarea')) return;
-    // 블록 아무 곳이나 잡고 드래그
-    e.preventDefault();
-    dragEl = block;
-    lastY = e.clientY;
-    dragEl.classList.add('eh-dragging');
-    window.addEventListener('pointermove', onDragMove);
-    window.addEventListener('pointerup', onDragUp, { once: true });
-    requestAnimationFrame(dragTick);
+    if (handle) onResizeDown(e, handle.closest('[data-bid]'), handle.dataset.dir);
   });
 
   $('#eh-save').addEventListener('click', async () => {
+    // 블록 배열은 원래 순서 유지(레이아웃 토큰의 b:번호가 이 순서를 가리킴)
     const clean = lastHomeBlocks.map((b) => { const c = { ...b }; delete c.__bid; return c; });
     try {
-      await db.setSetting('home_blocks', { blocks: clean });
+      await db.setSetting('home_blocks', { blocks: clean, layout: buildLayout() });
       location.hash = '#/';
     } catch (e) { dbError(e); }
   });
@@ -1710,6 +1702,7 @@ function route() {
   document.body.classList.remove('home-editing');
   $('#home-edit-bar')?.remove();
   $('#drop-line')?.remove();
+  if (homeSortable) { homeSortable.destroy(); homeSortable = null; }
   const hash = location.hash || '#/';
   const parts = hash.slice(2).split('/').map(decodeURIComponent);
   document.querySelectorAll('.main-nav a').forEach((a) => a.classList.remove('active'));
@@ -1753,6 +1746,16 @@ $('#btn-admin').addEventListener('click', async (e) => {
   }
   route();
 });
+
+/* 외부 이미지가 핫링크 차단으로 안 뜨면 이미지 프록시로 1회 재시도 (사이트 전체) */
+app.addEventListener('error', (e) => {
+  const img = e.target;
+  if (!img || img.tagName !== 'IMG' || img.dataset.proxied) return;
+  const src = img.src || '';
+  if (!/^https?:/.test(src) || src.includes('images.weserv.nl')) return;
+  img.dataset.proxied = '1';
+  img.src = 'https://images.weserv.nl/?url=' + encodeURIComponent(src);
+}, true);
 
 /* 부팅: 세션 복원 + 전역 효과 적용 후 첫 라우트 (효과 설정이 먼저 적용돼야 첫 화면부터 재생) */
 showLoading();

@@ -81,21 +81,33 @@ body.fx-parallax .hero-full > img,
 body.fx-parallax .interstitial > img { will-change: transform; }
 
 /* 홈 꾸미기 모드 (드래그 배치·크기 조절) */
-.home-editing [data-bid] {
+.home-editing .hm-item {
   position: relative;
-  outline: 2px dashed var(--rose);
+  outline: 2px dashed var(--line-strong);
   outline-offset: 4px;
 }
+.home-editing [data-bid] { outline-color: var(--rose); }
 .home-editing [data-bid].eh-dragging {
-  opacity: 0.5;
-  max-height: 140px;
-  overflow: hidden;
+  opacity: 0.6;
   outline-style: solid;
 }
-.home-editing [data-bid].eh-dragging.slideshow-block,
-.home-editing [data-bid].eh-dragging.hero-full { height: 140px; }
-.home-editing [data-bid] { cursor: grab; user-select: none; touch-action: none; }
-.home-editing [data-bid]:active { cursor: grabbing; }
+.eh-ghost {
+  opacity: 0.35;
+  max-height: 140px;
+  overflow: hidden;
+  outline: 2px solid var(--rose);
+  border-radius: 12px;
+}
+.sortable-fallback {
+  max-height: 140px !important;
+  overflow: hidden !important;
+  opacity: 0.9 !important;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+}
+.home-editing .hm-item { cursor: grab; user-select: none; touch-action: none; }
+.home-editing .hm-item:active { cursor: grabbing; }
+.home-editing .hm-item.eh-dragging { opacity: 0.6; outline-style: solid; }
 .eh-h {
   position: absolute;
   width: 18px; height: 18px;
