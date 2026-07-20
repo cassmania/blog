@@ -2,7 +2,7 @@
    글·댓글·게시판·설정 전부 Supabase DB 저장 — 모든 방문자가 같은 내용을 봄.
    비밀댓글: Web Crypto AES-GCM 암호화. 관리자: Supabase Auth 이메일 로그인. */
 
-const APP_VERSION = '16';
+const APP_VERSION = '17';
 const SUPABASE_URL = 'https://uarrnlbgowejwulzixqm.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_dsijIbtDJOt8LFGS90lMuA_d_OEHVuO';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -636,7 +636,7 @@ async function pageWrite(editId, isPage = false) {
   const IMG_EXT_RE = /^https?:\/\/\S+\.(?:jpg|jpeg|png|gif|webp|svg|avif|bmp)(\?[^\s]*)?$/i;
   const URL_RE = /^https?:\/\/\S+$/i;
   editor.addEventListener('paste', (e) => {
-    const text = e.clipboardData.getData('text/plain').trim();
+    const text = normalizeImgUrl(e.clipboardData.getData('text/plain').trim());
     if (!URL_RE.test(text)) return;
     e.preventDefault();
     if (IMG_EXT_RE.test(text)) {
@@ -948,15 +948,33 @@ function sizeCls(b) {
   const map = { full: '', 100: '', mid: ' w-70', 70: ' w-70', narrow: ' w-50', 50: ' w-50', 35: ' w-35' };
   let w = map[b.width];
   if (w === undefined) w = /^\d+$/.test(b.width) ? ' w-pct' : '';
+  if (b.mx !== undefined && b.mx !== null) return w; // 가로 위치 지정 시 정렬 클래스 무시
   const al = b.align === 'left' ? ' al-left' : b.align === 'right' ? ' al-right' : '';
   return w + al;
 }
 function sizeStyle(b) {
   const known = ['full', '100', 'mid', '70', 'narrow', '50', '35'];
+  const parts = [];
   if (b.width && /^\d+$/.test(b.width) && !known.includes(String(b.width))) {
-    return ` style="max-width:${Math.max(20, Math.min(100, +b.width))}%"`;
+    parts.push(`max-width:${Math.max(20, Math.min(100, +b.width))}%`);
   }
-  return '';
+  if (b.mx !== undefined && b.mx !== null) {
+    // 마우스로 정한 가로 위치 (왼쪽에서 % 오프셋) — 폭과 합쳐 100% 넘지 않게
+    const wNum = { full: 100, 100: 100, mid: 70, 70: 70, narrow: 50, 50: 50, 35: 35 }[b.width]
+      ?? (/^\d+$/.test(b.width) ? +b.width : 100);
+    parts.push(`margin-left:${Math.max(0, Math.min(100 - wNum, +b.mx))}%`, 'margin-right:auto');
+  }
+  return parts.length ? ` style="${parts.join(';')}"` : '';
+}
+
+/* 구글 이미지 검색 링크 등에서 실제 이미지 주소 추출 */
+function normalizeImgUrl(u) {
+  try {
+    const url = new URL(u);
+    const inner = url.searchParams.get('imgurl') || url.searchParams.get('mediaurl');
+    if (inner) return decodeURIComponent(inner);
+  } catch { /* URL 아님 */ }
+  return u;
 }
 
 /* 렌더된 블록에 선택한 효과 적용 */
@@ -1230,7 +1248,9 @@ async function pageBuild(editId, isHome = false) {
     const k = e.target.dataset.k;
     if (!card || !k) return;
     const b = blocks[+card.dataset.i];
-    b[k] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+    let v = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+    if (k === 'img' && typeof v === 'string') v = normalizeImgUrl(v.trim());
+    b[k] = v;
     if (k === 'img') card.querySelector('.build-img-preview').src = e.target.value || 'https://picsum.photos/seed/blank/400/300';
   });
   $('#block-list').addEventListener('click', async (e) => {
@@ -1246,7 +1266,7 @@ async function pageBuild(editId, isHome = false) {
     if (galDel) { blocks[i].imgs.splice(+galDel.dataset.gi, 1); drawBlocks(); return; }
     if (e.target.closest('.gal-url')) {
       const url = prompt('사진 URL을 입력하세요');
-      if (url && url.trim()) { blocks[i].imgs.push(url.trim()); drawBlocks(); }
+      if (url && url.trim()) { blocks[i].imgs.push(normalizeImgUrl(url.trim())); drawBlocks(); }
     }
   });
   $('#block-list').addEventListener('change', async (e) => {
@@ -1443,7 +1463,7 @@ async function pageSettings() {
     if (!e.target.classList.contains('slot-url')) return;
     const card = e.target.closest('.slot-card');
     const key = card.dataset.key;
-    draft[key].src = e.target.value.trim();
+    draft[key].src = normalizeImgUrl(e.target.value.trim());
     const def = IMAGE_SLOTS.find((s) => s.key === key).src;
     card.querySelector('.slot-preview img').src = draft[key].src || def;
   });
@@ -1606,7 +1626,19 @@ async function pageHomeEdit() {
     return out;
   };
 
+  // 폭 % 읽기 (인라인 스타일 → 클래스 → 100)
+  const widthPct = (el) => {
+    const mw = parseFloat(el.style.maxWidth);
+    if (!Number.isNaN(mw)) return mw;
+    if (el.classList.contains('w-70') || el.classList.contains('w-mid')) return 70;
+    if (el.classList.contains('w-50') || el.classList.contains('w-narrow')) return 50;
+    if (el.classList.contains('w-35')) return 35;
+    return 100;
+  };
+
   // 드래그 이동: SortableJS — 기본 섹션 포함 홈 전체 자유 배치
+  let dragPX = 0;
+  const trackX = (e) => { dragPX = e.clientX; };
   homeSortable = new Sortable(app, {
     draggable: '.hm-item',
     filter: '.eh-h',
@@ -1619,6 +1651,23 @@ async function pageHomeEdit() {
     scrollSpeed: 18,
     forceFallback: true, // HTML5 DnD 대신 포인터 기반 — 브라우저 편차 제거
     fallbackTolerance: 4,
+    onStart: () => window.addEventListener('pointermove', trackX),
+    onEnd: (evt) => {
+      window.removeEventListener('pointermove', trackX);
+      // 폭이 100% 미만인 커스텀 블록: 놓은 가로 위치를 그대로 반영
+      const el = evt.item;
+      if (el.dataset.bid === undefined) return;
+      const w = widthPct(el);
+      if (w >= 100 || !dragPX) return;
+      const appRect = app.getBoundingClientRect();
+      const wPx = appRect.width * w / 100;
+      const mx = Math.max(0, Math.min(100 - w, ((dragPX - appRect.left - wPx / 2) / appRect.width) * 100));
+      el.classList.remove('al-left', 'al-right');
+      el.style.marginLeft = mx.toFixed(1) + '%';
+      el.style.marginRight = 'auto';
+      const b = blockByBid[el.dataset.bid];
+      if (b) { b.mx = Math.round(mx); delete b.align; }
+    },
   });
 
   // 4모서리 크기 조절: 어느 모서리든 바깥으로 끌면 커지고 안쪽으로 끌면 작아짐
