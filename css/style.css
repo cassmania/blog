@@ -86,7 +86,14 @@ body.fx-parallax .interstitial > img { will-change: transform; }
   outline: 2px dashed var(--rose);
   outline-offset: 4px;
 }
-.home-editing [data-bid].eh-dragging { opacity: 0.45; }
+.home-editing [data-bid].eh-dragging {
+  opacity: 0.5;
+  max-height: 140px;
+  overflow: hidden;
+  outline-style: solid;
+}
+.home-editing [data-bid].eh-dragging.slideshow-block,
+.home-editing [data-bid].eh-dragging.hero-full { height: 140px; }
 .home-editing [data-bid] { cursor: grab; user-select: none; touch-action: none; }
 .home-editing [data-bid]:active { cursor: grabbing; }
 .eh-h {

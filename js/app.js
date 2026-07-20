@@ -2,7 +2,7 @@
    글·댓글·게시판·설정 전부 Supabase DB 저장 — 모든 방문자가 같은 내용을 봄.
    비밀댓글: Web Crypto AES-GCM 암호화. 관리자: Supabase Auth 이메일 로그인. */
 
-const APP_VERSION = '14';
+const APP_VERSION = '15';
 const SUPABASE_URL = 'https://uarrnlbgowejwulzixqm.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_dsijIbtDJOt8LFGS90lMuA_d_OEHVuO';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -617,12 +617,22 @@ async function pageWrite(editId, isPage = false) {
   });
 
   // 에디터 붙여넣기: 이미지 URL이면 <img>로 자동 변환
-  const IMG_URL_RE = /^https?:\/\/\S+\.(?:jpg|jpeg|png|gif|webp|svg|avif|bmp)(\?[^\s]*)?$/i;
+  // 확장자 있는 주소는 즉시, 확장자 없는 주소는 실제 이미지인지 로드해 본 뒤 삽입
+  const IMG_EXT_RE = /^https?:\/\/\S+\.(?:jpg|jpeg|png|gif|webp|svg|avif|bmp)(\?[^\s]*)?$/i;
+  const URL_RE = /^https?:\/\/\S+$/i;
   editor.addEventListener('paste', (e) => {
     const text = e.clipboardData.getData('text/plain').trim();
-    if (!IMG_URL_RE.test(text)) return;
+    if (!URL_RE.test(text)) return;
     e.preventDefault();
-    document.execCommand('insertImage', false, text);
+    if (IMG_EXT_RE.test(text)) {
+      document.execCommand('insertImage', false, text);
+      return;
+    }
+    // 확장자 없음: 이미지로 로드되면 삽입, 아니면 링크 텍스트로
+    const probe = new Image();
+    probe.onload = () => { editor.focus(); document.execCommand('insertImage', false, text); };
+    probe.onerror = () => { editor.focus(); document.execCommand('insertText', false, text); };
+    probe.src = text;
   });
 
   // 사진 첨부: 파일 → 리사이즈·압축 → data URL로 본문 삽입
@@ -1407,6 +1417,15 @@ async function pageSettings() {
     if (!card) return;
     if (e.target.closest('.slot-upload')) card.querySelector('.slot-file').click();
   });
+  // URL 붙여넣는 순간 미리보기 갱신 (blur 기다리지 않음)
+  $('#slot-list').addEventListener('input', (e) => {
+    if (!e.target.classList.contains('slot-url')) return;
+    const card = e.target.closest('.slot-card');
+    const key = card.dataset.key;
+    draft[key].src = e.target.value.trim();
+    const def = IMAGE_SLOTS.find((s) => s.key === key).src;
+    card.querySelector('.slot-preview img').src = draft[key].src || def;
+  });
   $('#slot-list').addEventListener('change', async (e) => {
     const card = e.target.closest('.slot-card');
     if (!card) return;
@@ -1587,6 +1606,7 @@ async function pageHomeEdit() {
   const onDragMove = (e) => {
     e.preventDefault();
     lastY = e.clientY;
+    app.insertBefore(dropLine, insertionRef(lastY)); // 즉시 갱신 (rAF 지연 보완)
   };
   const onDragUp = () => {
     window.removeEventListener('pointermove', onDragMove);
