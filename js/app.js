@@ -2,7 +2,7 @@
    글·댓글·게시판·설정 전부 Supabase DB 저장 — 모든 방문자가 같은 내용을 봄.
    비밀댓글: Web Crypto AES-GCM 암호화. 관리자: Supabase Auth 이메일 로그인. */
 
-const APP_VERSION = '13';
+const APP_VERSION = '14';
 const SUPABASE_URL = 'https://uarrnlbgowejwulzixqm.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_dsijIbtDJOt8LFGS90lMuA_d_OEHVuO';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -1522,20 +1522,28 @@ async function pageHomeEdit() {
   // 편집 중엔 등장 효과 전부 표시 상태로
   app.querySelectorAll('.fxi').forEach((el) => el.classList.add('in-view'));
 
-  // 블록마다 이동 그립 + 크기 조절 핸들
+  // 블록마다 4모서리 크기 조절 핸들 (드래그는 블록 아무 곳이나)
   app.querySelectorAll('[data-bid]').forEach((el) => {
     el.insertAdjacentHTML('beforeend',
-      '<div class="eh-grip" title="끌어서 위치 이동">⠿ 끌어서 이동</div><div class="eh-resize" title="끌어서 크기 조절"></div>');
+      '<div class="eh-h eh-nw" data-dir="nw"></div><div class="eh-h eh-ne" data-dir="ne"></div>' +
+      '<div class="eh-h eh-sw" data-dir="sw"></div><div class="eh-h eh-se" data-dir="se"></div>');
   });
 
   const dropLine = document.createElement('div');
   dropLine.id = 'drop-line';
   const bar = document.createElement('div');
   bar.id = 'home-edit-bar';
-  bar.innerHTML = '<span>블록을 끌어 위치 이동 · 오른쪽 아래 모서리를 끌어 크기 조절</span>' +
-    '<button type="button" class="btn-primary" id="eh-save">저장</button>' +
+  bar.innerHTML = '<button type="button" class="btn-primary" id="eh-save">저장</button>' +
     '<a href="#/" class="btn-secondary">취소</a>';
   document.body.appendChild(bar);
+
+  // 편집 중엔 블록 안 링크 클릭·이미지 기본 드래그 차단
+  app.addEventListener('click', (e) => {
+    if (document.body.classList.contains('home-editing') && e.target.closest('[data-bid] a')) e.preventDefault();
+  }, true);
+  app.addEventListener('dragstart', (e) => {
+    if (document.body.classList.contains('home-editing')) e.preventDefault();
+  });
 
   // 화면 배치 순서 → 블록의 anchor·순서로 역산
   const rebuildFromDom = () => {
@@ -1559,6 +1567,7 @@ async function pageHomeEdit() {
   };
 
   let dragEl = null;
+  let lastY = 0;
   const insertionRef = (y) => {
     for (const k of [...app.children]) {
       if (k === dragEl || k.id === 'drop-line') continue;
@@ -1567,9 +1576,17 @@ async function pageHomeEdit() {
     }
     return null;
   };
+  // 드래그 중 화면 가장자리 근처면 자동 스크롤 + 드롭 라인 갱신
+  const dragTick = () => {
+    if (!dragEl) return;
+    if (lastY < 100) window.scrollBy({ top: -24, behavior: 'instant' });
+    else if (lastY > innerHeight - 100) window.scrollBy({ top: 24, behavior: 'instant' });
+    app.insertBefore(dropLine, insertionRef(lastY));
+    requestAnimationFrame(dragTick);
+  };
   const onDragMove = (e) => {
     e.preventDefault();
-    app.insertBefore(dropLine, insertionRef(e.clientY));
+    lastY = e.clientY;
   };
   const onDragUp = () => {
     window.removeEventListener('pointermove', onDragMove);
@@ -1580,7 +1597,8 @@ async function pageHomeEdit() {
     rebuildFromDom();
   };
 
-  const onResizeDown = (e, el) => {
+  // 4모서리 크기 조절: 어느 모서리든 바깥으로 끌면 커지고 안쪽으로 끌면 작아짐
+  const onResizeDown = (e, el, dir) => {
     e.preventDefault();
     e.stopPropagation();
     el.classList.remove('w-70', 'w-50', 'w-35', 'w-mid', 'w-narrow');
@@ -1588,8 +1606,9 @@ async function pageHomeEdit() {
     const parentW = app.clientWidth;
     const startW = el.getBoundingClientRect().width;
     const startX = e.clientX;
+    const sign = dir.includes('w') ? -1 : 1; // 왼쪽 모서리는 왼쪽으로 끌수록 커짐
     const move = (ev) => {
-      const pct = Math.max(20, Math.min(100, ((startW + (ev.clientX - startX)) / parentW) * 100));
+      const pct = Math.max(20, Math.min(100, ((startW + sign * (ev.clientX - startX)) / parentW) * 100));
       el.style.maxWidth = pct + '%';
       el.dataset.pct = Math.round(pct);
     };
@@ -1603,17 +1622,22 @@ async function pageHomeEdit() {
   };
 
   app.addEventListener('pointerdown', (e) => {
-    const grip = e.target.closest('.eh-grip');
-    const rez = e.target.closest('.eh-resize');
-    if (grip) {
-      e.preventDefault();
-      dragEl = grip.closest('[data-bid]');
-      dragEl.classList.add('eh-dragging');
-      window.addEventListener('pointermove', onDragMove);
-      window.addEventListener('pointerup', onDragUp, { once: true });
-    } else if (rez) {
-      onResizeDown(e, rez.closest('[data-bid]'));
+    if (!document.body.classList.contains('home-editing')) return;
+    const handle = e.target.closest('.eh-h');
+    if (handle) {
+      onResizeDown(e, handle.closest('[data-bid]'), handle.dataset.dir);
+      return;
     }
+    const block = e.target.closest('[data-bid]');
+    if (!block || e.target.closest('a, button, input, select, textarea')) return;
+    // 블록 아무 곳이나 잡고 드래그
+    e.preventDefault();
+    dragEl = block;
+    lastY = e.clientY;
+    dragEl.classList.add('eh-dragging');
+    window.addEventListener('pointermove', onDragMove);
+    window.addEventListener('pointerup', onDragUp, { once: true });
+    requestAnimationFrame(dragTick);
   });
 
   $('#eh-save').addEventListener('click', async () => {

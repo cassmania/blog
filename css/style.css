@@ -87,32 +87,21 @@ body.fx-parallax .interstitial > img { will-change: transform; }
   outline-offset: 4px;
 }
 .home-editing [data-bid].eh-dragging { opacity: 0.45; }
-.eh-grip {
+.home-editing [data-bid] { cursor: grab; user-select: none; touch-action: none; }
+.home-editing [data-bid]:active { cursor: grabbing; }
+.eh-h {
   position: absolute;
-  top: 8px; left: 50%;
-  transform: translateX(-50%);
-  background: var(--rose);
-  color: #fff;
-  font-size: 12px;
-  padding: 5px 14px;
-  border-radius: 999px;
-  cursor: grab;
-  user-select: none;
-  touch-action: none;
-  z-index: 5;
-}
-.eh-grip:active { cursor: grabbing; }
-.eh-resize {
-  position: absolute;
-  right: 2px; bottom: 2px;
-  width: 22px; height: 22px;
+  width: 18px; height: 18px;
   background: var(--rose);
   border: 2px solid #fff;
   border-radius: 5px;
-  cursor: nwse-resize;
   touch-action: none;
-  z-index: 5;
+  z-index: 6;
 }
+.eh-nw { top: 2px; left: 2px; cursor: nwse-resize; }
+.eh-ne { top: 2px; right: 2px; cursor: nesw-resize; }
+.eh-sw { bottom: 2px; left: 2px; cursor: nesw-resize; }
+.eh-se { bottom: 2px; right: 2px; cursor: nwse-resize; }
 #drop-line {
   height: 4px;
   background: var(--rose);
