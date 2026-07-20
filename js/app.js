@@ -2,6 +2,7 @@
    글·댓글·게시판·설정 전부 Supabase DB 저장 — 모든 방문자가 같은 내용을 봄.
    비밀댓글: Web Crypto AES-GCM 암호화. 관리자: Supabase Auth 이메일 로그인. */
 
+const APP_VERSION = '13';
 const SUPABASE_URL = 'https://uarrnlbgowejwulzixqm.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_dsijIbtDJOt8LFGS90lMuA_d_OEHVuO';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -1711,6 +1712,8 @@ $('#btn-admin').addEventListener('click', async (e) => {
 
 /* 부팅: 세션 복원 + 전역 효과 적용 후 첫 라우트 (효과 설정이 먼저 적용돼야 첫 화면부터 재생) */
 showLoading();
+// 푸터에 버전 표시 — 캐시된 옛 버전인지 바로 확인용
+document.querySelector('.footer-copy')?.append(` · v${APP_VERSION}`);
 Promise.all([
   sb.auth.getSession(),
   db.getSetting('site_fx').catch(() => ({})),
