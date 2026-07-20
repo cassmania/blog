@@ -968,20 +968,16 @@ function sizeStyle(b) {
   return parts.length ? ` style="${parts.join(';')}"` : '';
 }
 
-/* 자유 배치(절대위치)·전체화면 적용 — free={x,y,w,h}는 앱 폭 %·h는 vh, fs=전체화면
-   free/fs가 있는 블록만 흐름에서 떼어내 자유 배치, 나머지는 기존 흐름 유지 */
+/* 자유 배치(절대위치) 적용 — free={x,y,w,h}, x·w는 화면 전체 폭 %, y·h는 vh
+   free가 있는 블록만 흐름에서 떼어내 자유 배치, 나머지는 기존 흐름 유지 */
 function applyFreeLayout(root = app) {
   let hasFree = false, maxBottom = 0;
   root.querySelectorAll('[data-bid]').forEach((el) => {
     const b = lastHomeBlocks[el.dataset.bid];
     if (!b) return;
-    // 초기화 (재적용 대비)
-    el.classList.remove('free-item', 'fs-item');
+    el.classList.remove('free-item');
     el.style.left = el.style.top = el.style.width = el.style.height = '';
-    if (b.fs) {
-      el.classList.add('fs-item');
-      hasFree = true;
-    } else if (b.free) {
+    if (b.free) {
       const f = b.free;
       el.classList.add('free-item');
       el.style.left = f.x + '%';
@@ -1616,7 +1612,7 @@ async function pageHomeEdit() {
 
   // 자유 배치 시작: 흐름에서 떼어내 현재 화면상 위치를 절대좌표로 고정
   const detach = (el) => {
-    if (el.classList.contains('free-item') || el.classList.contains('fs-item')) return;
+    if (el.classList.contains('free-item')) return;
     const b = blockByBid[el.dataset.bid];
     const r = el.getBoundingClientRect();
     const aw = app.clientWidth || 1;
@@ -1629,19 +1625,18 @@ async function pageHomeEdit() {
     applyFreeLayout();
   };
 
-  // 각 블록에 4모서리 크기 핸들 + 전체화면 토글 버튼
+  // 각 블록에 4모서리 크기 핸들
   freeEls.forEach((el) => {
     el.classList.add('hm-item');
     el.insertAdjacentHTML('beforeend',
       '<div class="eh-h eh-nw" data-dir="nw"></div><div class="eh-h eh-ne" data-dir="ne"></div>' +
-      '<div class="eh-h eh-sw" data-dir="sw"></div><div class="eh-h eh-se" data-dir="se"></div>' +
-      '<button type="button" class="eh-fs" title="전체화면 켜기/끄기">⛶</button>');
+      '<div class="eh-h eh-sw" data-dir="sw"></div><div class="eh-h eh-se" data-dir="se"></div>');
   });
   applyFreeLayout();
 
   const bar = document.createElement('div');
   bar.id = 'home-edit-bar';
-  bar.innerHTML = '<span class="eh-hint">블록을 끌어 자유롭게 이동 · 모서리로 크기 · ⛶ 전체화면</span>' +
+  bar.innerHTML = '<span class="eh-hint">블록을 끌어 화면 어디든(좌·우·상·하 끝까지) 이동 · 모서리로 크기</span>' +
     '<button type="button" class="btn-primary" id="eh-save">저장</button>' +
     '<a href="#/" class="btn-secondary">취소</a>';
   document.body.appendChild(bar);
@@ -1656,7 +1651,6 @@ async function pageHomeEdit() {
   const onResizeDown = (e, el, dir) => {
     e.preventDefault(); e.stopPropagation();
     const b = blockByBid[el.dataset.bid];
-    if (b.fs) return;
     if (!el.classList.contains('free-item')) detach(el);
     const aw = app.clientWidth, vh = window.innerHeight;
     const r0 = el.getBoundingClientRect();
@@ -1679,7 +1673,6 @@ async function pageHomeEdit() {
   // 블록 몸통 드래그 = 자유 2D 이동 (좌우·상하)
   const onDragDown = (e, el) => {
     const b = blockByBid[el.dataset.bid];
-    if (b.fs) return; // 전체화면 블록은 이동 안 함
     if (!el.classList.contains('free-item')) detach(el);
     e.preventDefault();
     const aw = app.clientWidth, vh = window.innerHeight;
@@ -1708,26 +1701,13 @@ async function pageHomeEdit() {
     if (!item) return;
     const handle = e.target.closest('.eh-h');
     if (handle) { onResizeDown(e, item, handle.dataset.dir); return; }
-    if (e.target.closest('.eh-fs')) return; // 전체화면 버튼은 click에서 처리
     onDragDown(e, item);
   });
-
-  // 전체화면 토글
-  app.addEventListener('click', (e) => {
-    const fsBtn = e.target.closest('.eh-fs');
-    if (!fsBtn) return;
-    e.preventDefault(); e.stopPropagation();
-    const el = fsBtn.closest('.hm-item');
-    const b = blockByBid[el.dataset.bid];
-    b.fs = !b.fs;
-    if (b.fs) delete b.free;
-    applyFreeLayout();
-  }, true);
 
   $('#eh-save').addEventListener('click', async () => {
     const clean = lastHomeBlocks.map((b) => { const c = { ...b }; delete c.__bid; return c; });
     try {
-      // 자유 배치 저장 시 기존 흐름-순서 layout 토큰은 무시(free/fs가 우선)
+      // 자유 배치 저장 시 기존 흐름-순서 layout 토큰은 무시(free가 우선)
       await db.setSetting('home_blocks', { blocks: clean });
       location.hash = '#/';
     } catch (e) { dbError(e); }

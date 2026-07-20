@@ -95,32 +95,19 @@ body.fx-parallax .interstitial > img { will-change: transform; }
 .home-editing .hm-item:active { cursor: grabbing; }
 .home-editing .hm-item.eh-dragging { opacity: 0.7; outline-style: solid; z-index: 50; }
 
-/* 자유 배치(절대위치) + 전체화면 */
-#app.has-free { position: relative; }
+/* 자유 배치(절대위치) — 좌표 기준을 화면 전체 폭으로 (max-width·padding 해제) */
+#app.has-free {
+  position: relative;
+  max-width: none;
+  padding-left: 0;
+  padding-right: 0;
+}
 .free-item {
   position: absolute !important;
   margin: 0 !important;
   max-width: none !important;
   box-sizing: border-box;
   z-index: 3;
-}
-.fs-item {
-  position: fixed !important;
-  inset: 0 !important;
-  margin: 0 !important;
-  width: 100vw !important; height: 100vh !important;
-  max-width: none !important;
-  z-index: 4;
-}
-.home-editing .fs-item { z-index: 40; outline: 3px solid var(--rose); }
-.eh-fs {
-  position: absolute;
-  top: 6px; left: 50%; transform: translateX(-50%);
-  width: 34px; height: 26px;
-  background: var(--ink); color: #fff;
-  border: 2px solid #fff; border-radius: 6px;
-  font-size: 0.9rem; line-height: 1; cursor: pointer;
-  z-index: 7;
 }
 .eh-hint { color: #fff; opacity: 0.85; font-size: 0.78rem; }
 .eh-h {
