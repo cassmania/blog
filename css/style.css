@@ -80,7 +80,13 @@ body.fx-hover .photo-block img:hover { transform: scale(1.04); }
 body.fx-parallax .hero-full > img,
 body.fx-parallax .interstitial > img { will-change: transform; }
 
-/* 블록 폭 옵션 */
+/* 블록 크기·정렬 옵션 */
+.w-70 { max-width: 70%; margin-left: auto; margin-right: auto; }
+.w-50 { max-width: 50%; margin-left: auto; margin-right: auto; }
+.w-35 { max-width: 35%; margin-left: auto; margin-right: auto; }
+.al-left { margin-left: 0; margin-right: auto; }
+.al-right { margin-right: 0; margin-left: auto; }
+/* 구버전 저장값 호환 */
 .w-mid { max-width: 760px; margin-left: auto; margin-right: auto; }
 .w-narrow { max-width: 540px; margin-left: auto; margin-right: auto; }
 
@@ -1053,6 +1059,7 @@ main { max-width: var(--container); margin: 0 auto; padding: 0 24px 120px; }
   .fx-row { grid-template-columns: 1fr 1fr; }
   .fx-sample { grid-column: 1 / -1; }
   .gallery-grid.cols-3, .gallery-grid.cols-4 { grid-template-columns: repeat(2, 1fr); }
+  .w-70, .w-50, .w-35 { max-width: 100%; } /* 모바일에선 전체폭 */
 .post-view { padding-top: 36px; }
   .post-meta { flex-wrap: wrap; gap: 8px; }
   .comment-form-left { gap: 10px; flex-wrap: wrap; }

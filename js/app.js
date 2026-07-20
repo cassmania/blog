@@ -399,10 +399,25 @@ async function pageHome() {
     applySiteImages(images);
     applyHomeTexts(texts);
     if (Array.isArray(home.blocks) && home.blocks.length) {
-      // 조립한 블록: 기존 화면 유지, 선택한 위치(위/아래)에 추가
-      const html = blocksHtml(home.blocks);
-      if (home.position === 'top') app.insertAdjacentHTML('afterbegin', html);
-      else $('#custom-pages-section').insertAdjacentHTML('beforebegin', html);
+      // 블록별 배치 위치(anchor)에 따라 기본 화면 사이사이에 삽입
+      const legacyAnchor = home.position === 'top' ? 'top' : 'end';
+      const groups = {};
+      home.blocks.forEach((b) => {
+        const a = b.anchor || legacyAnchor;
+        (groups[a] = groups[a] || []).push(b);
+      });
+      const refSel = {
+        hero: '.hero-full', intro: '.intro-split',
+        f1: '.alt-row:not(.alt-reverse)', f2: '.alt-reverse', banner: '.interstitial',
+      };
+      Object.entries(groups).forEach(([a, list]) => {
+        const html = blocksHtml(list);
+        if (a === 'top') { app.insertAdjacentHTML('afterbegin', html); return; }
+        if (a === 'bottom') { app.insertAdjacentHTML('beforeend', html); return; }
+        const ref = refSel[a] ? app.querySelector(refSel[a]) : null;
+        if (ref) ref.insertAdjacentHTML('afterend', html);
+        else $('#custom-pages-section').insertAdjacentHTML('beforebegin', html); // end 또는 기준 없음
+      });
       applyBlockFx();
     }
     const box = $('#recent-posts');
@@ -880,6 +895,26 @@ const BLOCK_SPEEDS = [
 ];
 const speedDur = (k) => (BLOCK_SPEEDS.find((s) => s.key === k) || BLOCK_SPEEDS[1]).dur;
 
+/* 홈 블록 배치 지점 */
+const HOME_ANCHORS = [
+  { key: 'top', label: '맨 위 (히어로 위)' },
+  { key: 'hero', label: '히어로 아래' },
+  { key: 'intro', label: '소개 문단 아래' },
+  { key: 'f1', label: '01 섹션 아래' },
+  { key: 'f2', label: '02 섹션 아래' },
+  { key: 'banner', label: '중간 배너 아래' },
+  { key: 'end', label: '기본 화면 아래 (기본)' },
+  { key: 'bottom', label: '맨 아래 (최근 글 아래)' },
+];
+
+/* 블록 폭·정렬 클래스 (구버전 full/mid/narrow 값도 처리) */
+function sizeCls(b) {
+  const map = { full: '', 100: '', mid: ' w-70', 70: ' w-70', narrow: ' w-50', 50: ' w-50', 35: ' w-35' };
+  const w = map[b.width] ?? '';
+  const al = b.align === 'left' ? ' al-left' : b.align === 'right' ? ' al-right' : '';
+  return w + al;
+}
+
 /* 렌더된 블록에 선택한 효과 적용 */
 function applyBlockFx(root = app) {
   root.querySelectorAll('[data-fx]').forEach((el) => {
@@ -910,7 +945,7 @@ function parseBuilderContent(content) {
 function blocksHtml(blocks) {
   return blocks.map((b) => {
     const fxAttr = `data-fx="${escapeHtml(b.fx || 'none')}" data-dur="${speedDur(b.speed)}"`;
-    const w = b.width === 'mid' ? ' w-mid' : b.width === 'narrow' ? ' w-narrow' : '';
+    const w = sizeCls(b);
     if (b.type === 'hero') {
       const btn = b.btnText ? `<a href="${escapeHtml(b.btnLink || '#')}" class="btn-pill">${escapeHtml(b.btnText)}</a>` : '';
       return `<section class="hero-full${w}" ${fxAttr}>
@@ -994,13 +1029,14 @@ async function pageBuild(editId, isHome = false) {
   if (isHome) {
     $('#build-title').textContent = '홈 화면 편집';
     $('#build-page-title').closest('.field').hidden = true;
-    $('#build-position-field').hidden = false;
     let saved;
     try { saved = await db.getSetting('home_blocks'); } catch (e) { dbError(e); return; }
-    $('#build-position').value = saved.position === 'top' ? 'top' : 'bottom';
     blocks = Array.isArray(saved.blocks) && saved.blocks.length
       ? saved.blocks
       : [{ type: 'slideshow', ...BLOCK_DEFAULTS.slideshow }];
+    // 구버전 전체 위치 설정을 블록별 배치 위치로 이관
+    const legacyAnchor = saved.position === 'top' ? 'top' : 'end';
+    blocks.forEach((b) => { if (!b.anchor) b.anchor = legacyAnchor; });
   } else {
     if (editId) {
       try { editing = await db.getPage(editId); } catch (e) { dbError(e); return; }
@@ -1100,13 +1136,25 @@ async function pageBuild(editId, isHome = false) {
         <select class="slot-fx" data-k="speed">${BLOCK_SPEEDS.map((s) =>
           `<option value="${s.key}" ${(b.speed || 'normal') === s.key ? 'selected' : ''}>${s.label}</option>`).join('')}</select>
       </label>
-      <label class="tool-label">폭
+      <label class="tool-label">크기
         <select class="slot-fx" data-k="width">
-          <option value="full" ${!b.width || b.width === 'full' ? 'selected' : ''}>전체</option>
-          <option value="mid" ${b.width === 'mid' ? 'selected' : ''}>중간</option>
-          <option value="narrow" ${b.width === 'narrow' ? 'selected' : ''}>좁게</option>
+          <option value="100" ${!b.width || b.width === 'full' || b.width === '100' ? 'selected' : ''}>전체 (100%)</option>
+          <option value="70" ${b.width === 'mid' || b.width === '70' ? 'selected' : ''}>크게 (70%)</option>
+          <option value="50" ${b.width === 'narrow' || b.width === '50' ? 'selected' : ''}>절반 (50%)</option>
+          <option value="35" ${b.width === '35' ? 'selected' : ''}>작게 (35%)</option>
         </select>
       </label>
+      <label class="tool-label">정렬
+        <select class="slot-fx" data-k="align">
+          <option value="center" ${!b.align || b.align === 'center' ? 'selected' : ''}>가운데</option>
+          <option value="left" ${b.align === 'left' ? 'selected' : ''}>왼쪽</option>
+          <option value="right" ${b.align === 'right' ? 'selected' : ''}>오른쪽</option>
+        </select>
+      </label>
+      ${isHome ? `<label class="tool-label">배치 위치
+        <select class="slot-fx" data-k="anchor">${HOME_ANCHORS.map((a) =>
+          `<option value="${a.key}" ${(b.anchor || 'end') === a.key ? 'selected' : ''}>${a.label}</option>`).join('')}</select>
+      </label>` : ''}
     </div>`;
   const imgField = (src) => `<div class="build-img-row">
       <img class="build-img-preview" src="${escapeHtml(src)}" alt="">
@@ -1196,7 +1244,7 @@ async function pageBuild(editId, isHome = false) {
     }
     if (isHome) {
       try {
-        await db.setSetting('home_blocks', { blocks, position: $('#build-position').value });
+        await db.setSetting('home_blocks', { blocks });
         location.hash = '#/';
       } catch (e) { dbError(e); }
       return;
