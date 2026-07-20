@@ -317,15 +317,25 @@ const revealObserver = new IntersectionObserver((entries) => {
   });
 }, { threshold: 0.12 });
 
-/* 관찰 + 안전장치: 이미 화면 안이면 타이머로도 in-view 부여 (IO 미발화 환경 대비) */
+/* 관찰 + 안전장치: IO가 안 도는 환경에서도 타이머가 화면 안 요소를 계속 검사해 반드시 재생 */
+const pendingFx = new Set();
 function safeObserve(el) {
   void el.offsetWidth; // 리플로 강제 — 초기 숨김 상태를 확정해 전환이 반드시 재생되게
   revealObserver.observe(el);
-  const r = el.getBoundingClientRect();
-  if (r.top < innerHeight && r.bottom > 0) {
-    setTimeout(() => el.classList.add('in-view'), 450);
-  }
+  pendingFx.add(el);
 }
+setInterval(() => {
+  pendingFx.forEach((el) => {
+    if (!el.isConnected) { pendingFx.delete(el); return; }
+    if (el.classList.contains('in-view')) { pendingFx.delete(el); return; }
+    const r = el.getBoundingClientRect();
+    if (r.top < innerHeight * 0.95 && r.bottom > 0) {
+      el.classList.add('in-view');
+      pendingFx.delete(el);
+      revealObserver.unobserve(el);
+    }
+  });
+}, 350);
 
 function initReveal() {
   if (motionBlocked()) return;
