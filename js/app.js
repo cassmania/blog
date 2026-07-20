@@ -278,6 +278,22 @@ function compressImage(file, maxW = 1280, quality = 0.8) {
   });
 }
 
+/* 사진 업로드: 압축 후 Supabase Storage에 올려 URL 반환 (용량 제한 해결)
+   Storage 실패 시 data URL로 폴백 */
+async function uploadPhoto(file, maxW = 1600, quality = 0.8) {
+  const dataUrl = await compressImage(file, maxW, quality);
+  try {
+    const blob = await (await fetch(dataUrl)).blob();
+    const path = `${crypto.randomUUID()}.jpg`;
+    const { error } = await sb.storage.from('photos').upload(path, blob, { contentType: 'image/jpeg' });
+    if (error) throw error;
+    return sb.storage.from('photos').getPublicUrl(path).data.publicUrl;
+  } catch (e) {
+    console.warn('Storage 업로드 실패 — data URL로 저장:', e?.message);
+    return dataUrl;
+  }
+}
+
 function render(tplId) {
   app.innerHTML = '';
   app.appendChild($('#' + tplId).content.cloneNode(true));
@@ -288,8 +304,9 @@ function showLoading() {
   app.innerHTML = '<p class="empty-msg loading-msg">불러오는 중…</p>';
 }
 
-/* 스크롤 리빌 (prefers-reduced-motion 존중) */
+/* 스크롤 리빌 — 기본은 시스템 '애니메이션 끄기' 존중, 설정에서 '항상 재생' 선택 가능 */
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const motionBlocked = () => reduceMotion.matches && !document.body.classList.contains('fx-force');
 const revealObserver = new IntersectionObserver((entries) => {
   entries.forEach((en) => {
     if (en.isIntersecting) {
@@ -311,7 +328,7 @@ function safeObserve(el) {
 }
 
 function initReveal() {
-  if (reduceMotion.matches) return;
+  if (motionBlocked()) return;
   app.querySelectorAll('.post-card, .post-item, .alt-row, .pillar, .interstitial, .intro-split')
     .forEach((el, i) => {
       if (el.classList.contains('no-reveal')) return; // 게시판별 효과가 이미 적용됨
@@ -351,7 +368,7 @@ function applySiteImages(saved) {
     const conf = saved[slot.key] || {};
     if (conf.src) img.src = conf.src;
     const fx = conf.fx || 'none';
-    if (fx === 'none' || reduceMotion.matches) return;
+    if (fx === 'none' || motionBlocked()) return;
     if (fx === 'kenburns') {
       img.classList.add('fx-kenburns');
     } else {
@@ -455,7 +472,7 @@ async function pageBoard(category) {
       : '<p class="empty-msg">글이 없습니다.</p>';
     // 게시판별 등장 효과: 저장된 효과가 있으면 기본 리빌 대신 적용
     const fx = boardFx[category || '전체'] || 'rise';
-    if (fx !== 'rise' && !reduceMotion.matches) {
+    if (fx !== 'rise' && !motionBlocked()) {
       $('#board-posts').querySelectorAll('.post-item').forEach((el, i) => {
         el.classList.add('no-reveal'); // 기본 리빌 대신 게시판 효과 사용
         if (fx === 'none') return;
@@ -583,7 +600,7 @@ async function pageWrite(editId, isPage = false) {
   $('#photo-input').addEventListener('change', async (e) => {
     for (const file of e.target.files) {
       try {
-        const dataUrl = await compressImage(file);
+        const dataUrl = await uploadPhoto(file);
         editor.focus();
         document.execCommand('insertImage', false, dataUrl);
       } catch {
@@ -858,7 +875,7 @@ function applyBlockFx(root = app) {
   root.querySelectorAll('[data-fx]').forEach((el) => {
     el.classList.add('no-reveal'); // 기본 리빌 대신 블록 자체 효과
     const fx = el.dataset.fx;
-    if (fx === 'none' || reduceMotion.matches) return;
+    if (fx === 'none' || motionBlocked()) return;
     // 갤러리: 사진 한 장씩 순차 등장, 나머지: 블록 통째로
     const targets = el.dataset.fxEach ? [...el.children] : [el];
     targets.forEach((t, i) => {
@@ -942,7 +959,7 @@ let slideTimers = [];
 function initSlideshows(root = app) {
   root.querySelectorAll('.slideshow-block').forEach((box) => {
     const imgs = box.querySelectorAll('img');
-    if (imgs.length < 2 || reduceMotion.matches) return;
+    if (imgs.length < 2 || motionBlocked()) return;
     let cur = 0;
     slideTimers.push(setInterval(() => {
       imgs[cur].classList.remove('active');
@@ -1134,7 +1151,7 @@ async function pageBuild(editId, isHome = false) {
     if (!card) return;
     if (e.target.classList.contains('build-file') && e.target.files[0]) {
       try {
-        const dataUrl = await compressImage(e.target.files[0], 1600, 0.8);
+        const dataUrl = await uploadPhoto(e.target.files[0], 1600, 0.8);
         blocks[+card.dataset.i].img = dataUrl;
         card.querySelector('.build-img-preview').src = dataUrl;
         card.querySelector('input[data-k="img"]').value = '';
@@ -1145,7 +1162,7 @@ async function pageBuild(editId, isHome = false) {
       const b = blocks[+card.dataset.i];
       let fail = 0;
       for (const file of e.target.files) {
-        try { b.imgs.push(await compressImage(file, 1200, 0.75)); } catch { fail++; }
+        try { b.imgs.push(await uploadPhoto(file, 1200, 0.75)); } catch { fail++; }
       }
       if (fail) alert(`${fail}장은 이미지 파일이 아니라 건너뛰었습니다.`);
       e.target.value = '';
@@ -1323,7 +1340,7 @@ async function pageSettings() {
     const key = card.dataset.key;
     if (e.target.classList.contains('slot-file') && e.target.files[0]) {
       try {
-        const dataUrl = await compressImage(e.target.files[0], 1600, 0.8);
+        const dataUrl = await uploadPhoto(e.target.files[0], 1600, 0.8);
         draft[key].src = dataUrl;
         card.querySelector('.slot-url').value = '';
         card.querySelector('.slot-preview img').src = dataUrl;
@@ -1415,6 +1432,7 @@ function applySiteFx(conf) {
   document.body.classList.toggle('fx-hover', !!conf.hover);
   document.body.classList.toggle('fx-parallax', !!conf.parallax);
   document.body.classList.toggle('fx-progress', !!conf.progress);
+  document.body.classList.toggle('fx-force', !!conf.force);
 }
 
 let fxTicking = false;
@@ -1429,7 +1447,7 @@ window.addEventListener('scroll', () => {
       const p = h.scrollTop / Math.max(1, h.scrollHeight - h.clientHeight);
       $('#scroll-progress').style.width = (p * 100).toFixed(2) + '%';
     }
-    if (body.classList.contains('fx-parallax') && !reduceMotion.matches) {
+    if (body.classList.contains('fx-parallax') && !motionBlocked()) {
       document.querySelectorAll('.hero-full > img, .interstitial > img').forEach((img) => {
         const r = img.parentElement.getBoundingClientRect();
         if (r.bottom > 0 && r.top < innerHeight) {
@@ -1486,10 +1504,13 @@ $('#btn-admin').addEventListener('click', async (e) => {
   route();
 });
 
-/* 부팅: 세션 복원 + 전역 효과 적용 후 첫 라우트 */
+/* 부팅: 세션 복원 + 전역 효과 적용 후 첫 라우트 (효과 설정이 먼저 적용돼야 첫 화면부터 재생) */
 showLoading();
-sb.auth.getSession().then(({ data }) => {
+Promise.all([
+  sb.auth.getSession(),
+  db.getSetting('site_fx').catch(() => ({})),
+]).then(([{ data }, siteFx]) => {
   adminOn = !!data.session;
+  applySiteFx(siteFx);
   route();
 });
-db.getSetting('site_fx').then(applySiteFx).catch(() => { /* 효과 미설정 */ });

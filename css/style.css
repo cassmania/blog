@@ -133,14 +133,15 @@ body.fx-parallax .interstitial > img { will-change: transform; }
 .photo-block img { width: 100%; object-fit: cover; display: block; }
 .photo-caption { text-align: center; color: var(--ink-faint); font-size: 0.88rem; padding: 10px 0 0; }
 
+/* 시스템 '애니메이션 끄기' 존중 — 단, 설정에서 '항상 재생'(fx-force) 켜면 무시 */
 @media (prefers-reduced-motion: reduce) {
-  .reveal { opacity: 1; transform: none; }
-  .fx { opacity: 1; transform: none; }
-  .fx-kenburns { animation: none; }
-  #app .fxi { opacity: 1; transform: none; filter: none; }
-  body.fx-parallax .hero-full > img,
-  body.fx-parallax .interstitial > img { transform: none !important; }
-  * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+  body:not(.fx-force) .reveal { opacity: 1; transform: none; }
+  body:not(.fx-force) .fx { opacity: 1; transform: none; }
+  body:not(.fx-force) .fx-kenburns { animation: none; }
+  body:not(.fx-force) #app .fxi { opacity: 1; transform: none; filter: none; }
+  body.fx-parallax:not(.fx-force) .hero-full > img,
+  body.fx-parallax:not(.fx-force) .interstitial > img { transform: none !important; }
+  body:not(.fx-force) * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }

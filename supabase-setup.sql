@@ -113,3 +113,11 @@ values (
   '<p>丕刀卜己卜人丨廿卜 블로그에 오신 것을 환영합니다.</p><p>이제 모든 글과 댓글이 실시간으로 공유됩니다.</p><blockquote>기록은 생각을 단단하게 만든다.</blockquote>'
 )
 on conflict do nothing;
+
+-- 사진 저장소 (Storage): 수백 장 업로드용 공개 버킷
+insert into storage.buckets (id, name, public) values ('photos', 'photos', true)
+on conflict (id) do nothing;
+
+create policy "photos read" on storage.objects for select using (bucket_id = 'photos');
+create policy "photos write" on storage.objects for insert to authenticated with check (bucket_id = 'photos');
+create policy "photos delete" on storage.objects for delete to authenticated using (bucket_id = 'photos');
