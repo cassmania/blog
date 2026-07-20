@@ -440,6 +440,7 @@ async function pageHome() {
         if (el) app.insertBefore(el, ref);
       });
     }
+    applyFreeLayout();
     const box = $('#recent-posts');
     if (!box) return; // 페이지 이동됨
     box.innerHTML = posts.length
@@ -965,6 +966,34 @@ function sizeStyle(b) {
     parts.push(`margin-left:${Math.max(0, Math.min(100 - wNum, +b.mx))}%`, 'margin-right:auto');
   }
   return parts.length ? ` style="${parts.join(';')}"` : '';
+}
+
+/* 자유 배치(절대위치)·전체화면 적용 — free={x,y,w,h}는 앱 폭 %·h는 vh, fs=전체화면
+   free/fs가 있는 블록만 흐름에서 떼어내 자유 배치, 나머지는 기존 흐름 유지 */
+function applyFreeLayout(root = app) {
+  let hasFree = false, maxBottom = 0;
+  root.querySelectorAll('[data-bid]').forEach((el) => {
+    const b = lastHomeBlocks[el.dataset.bid];
+    if (!b) return;
+    // 초기화 (재적용 대비)
+    el.classList.remove('free-item', 'fs-item');
+    el.style.left = el.style.top = el.style.width = el.style.height = '';
+    if (b.fs) {
+      el.classList.add('fs-item');
+      hasFree = true;
+    } else if (b.free) {
+      const f = b.free;
+      el.classList.add('free-item');
+      el.style.left = f.x + '%';
+      el.style.top = f.y + 'vh';
+      el.style.width = f.w + '%';
+      if (f.h) el.style.height = f.h + 'vh';
+      hasFree = true;
+      maxBottom = Math.max(maxBottom, (f.y || 0) + (f.h || 40));
+    }
+  });
+  root.classList.toggle('has-free', hasFree);
+  root.style.minHeight = maxBottom ? `calc(${maxBottom}vh + 60px)` : '';
 }
 
 /* 구글 이미지 검색 링크 등에서 실제 이미지 주소 추출 */
@@ -1561,7 +1590,6 @@ async function pageSettings() {
 
 /* ===== 홈 꾸미기 모드: 드래그 배치 + 모서리 크기 조절 ===== */
 let lastHomeBlocks = [];
-let homeSortable = null;
 
 async function pageHomeEdit() {
   if (!admin.isLoggedIn()) {
@@ -1577,134 +1605,130 @@ async function pageHomeEdit() {
     return;
   }
   document.body.classList.add('home-editing');
-  // bid → 블록 고정 매핑 (드래그로 배열 순서가 바뀌어도 안전)
+  // bid → 블록 고정 매핑
   const blockByBid = {};
   lastHomeBlocks.forEach((b) => { blockByBid[b.__bid] = b; });
   // 편집 중엔 등장 효과 전부 표시 상태로
   app.querySelectorAll('.fxi').forEach((el) => el.classList.add('in-view'));
 
-  // 블록마다 4모서리 크기 조절 핸들 (드래그는 블록 아무 곳이나)
-  app.querySelectorAll('[data-bid]').forEach((el) => {
+  // 내가 추가한 블록만 자유 배치 대상 (기본 섹션은 그대로 흐름 유지)
+  const freeEls = [...app.querySelectorAll('[data-bid]')];
+
+  // 자유 배치 시작: 흐름에서 떼어내 현재 화면상 위치를 절대좌표로 고정
+  const detach = (el) => {
+    if (el.classList.contains('free-item') || el.classList.contains('fs-item')) return;
+    const b = blockByBid[el.dataset.bid];
+    const r = el.getBoundingClientRect();
+    const aw = app.clientWidth || 1;
+    const x = ((r.left - app.getBoundingClientRect().left) / aw) * 100;
+    const y = (r.top - app.getBoundingClientRect().top) / window.innerHeight * 100;
+    const w = (r.width / aw) * 100;
+    const h = (r.height / window.innerHeight) * 100;
+    b.free = { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
+    delete b.mx; delete b.align;
+    applyFreeLayout();
+  };
+
+  // 각 블록에 4모서리 크기 핸들 + 전체화면 토글 버튼
+  freeEls.forEach((el) => {
+    el.classList.add('hm-item');
     el.insertAdjacentHTML('beforeend',
       '<div class="eh-h eh-nw" data-dir="nw"></div><div class="eh-h eh-ne" data-dir="ne"></div>' +
-      '<div class="eh-h eh-sw" data-dir="sw"></div><div class="eh-h eh-se" data-dir="se"></div>');
+      '<div class="eh-h eh-sw" data-dir="sw"></div><div class="eh-h eh-se" data-dir="se"></div>' +
+      '<button type="button" class="eh-fs" title="전체화면 켜기/끄기">⛶</button>');
   });
-  // 기본 섹션들도 드래그 대상으로 — 홈 전체를 자유 배치
-  const DEFAULT_SECTIONS = [
-    ['.hero-full:not([data-bid])', 'hero'], ['.intro-split:not([data-bid])', 'intro'],
-    ['.alt-row:not(.alt-reverse):not([data-bid])', 'f1'], ['.alt-reverse:not([data-bid])', 'f2'],
-    ['.interstitial:not([data-bid])', 'banner'], ['.pillar-strip', 'pillar'],
-  ];
-  DEFAULT_SECTIONS.forEach(([sel, key]) => {
-    const el = app.querySelector(sel);
-    if (el) { el.classList.add('hm-item'); el.dataset.dkey = key; }
-  });
-  app.querySelectorAll('[data-bid]').forEach((el) => el.classList.add('hm-item'));
+  applyFreeLayout();
 
   const bar = document.createElement('div');
   bar.id = 'home-edit-bar';
-  bar.innerHTML = '<button type="button" class="btn-primary" id="eh-save">저장</button>' +
+  bar.innerHTML = '<span class="eh-hint">블록을 끌어 자유롭게 이동 · 모서리로 크기 · ⛶ 전체화면</span>' +
+    '<button type="button" class="btn-primary" id="eh-save">저장</button>' +
     '<a href="#/" class="btn-secondary">취소</a>';
   document.body.appendChild(bar);
 
   // 편집 중엔 블록 안 링크 클릭·이미지 기본 드래그 차단
   app.addEventListener('click', (e) => {
-    if (document.body.classList.contains('home-editing') && e.target.closest('.hm-item a')) e.preventDefault();
+    if (e.target.closest('.hm-item a')) e.preventDefault();
   }, true);
-  app.addEventListener('dragstart', (e) => {
-    if (document.body.classList.contains('home-editing')) e.preventDefault();
-  });
+  app.addEventListener('dragstart', (e) => e.preventDefault());
 
-  // 화면 배치 순서 → 저장용 레이아웃 토큰 (기본 섹션 + 블록 전부)
-  const buildLayout = () => {
-    const out = [];
-    for (const el of [...app.children]) {
-      if (el.id === 'custom-pages-section') break;
-      if (el.dataset.bid !== undefined) out.push('b:' + el.dataset.bid);
-      else if (el.dataset.dkey) out.push('d:' + el.dataset.dkey);
-    }
-    return out;
-  };
-
-  // 폭 % 읽기 (인라인 스타일 → 클래스 → 100)
-  const widthPct = (el) => {
-    const mw = parseFloat(el.style.maxWidth);
-    if (!Number.isNaN(mw)) return mw;
-    if (el.classList.contains('w-70') || el.classList.contains('w-mid')) return 70;
-    if (el.classList.contains('w-50') || el.classList.contains('w-narrow')) return 50;
-    if (el.classList.contains('w-35')) return 35;
-    return 100;
-  };
-
-  // 드래그 이동: SortableJS — 기본 섹션 포함 홈 전체 자유 배치
-  let dragPX = 0;
-  const trackX = (e) => { dragPX = e.clientX; };
-  homeSortable = new Sortable(app, {
-    draggable: '.hm-item',
-    filter: '.eh-h',
-    preventOnFilter: false,
-    animation: 180,
-    ghostClass: 'eh-ghost',
-    chosenClass: 'eh-dragging',
-    scroll: true,
-    scrollSensitivity: 110,
-    scrollSpeed: 18,
-    forceFallback: true, // HTML5 DnD 대신 포인터 기반 — 브라우저 편차 제거
-    fallbackTolerance: 4,
-    onStart: () => window.addEventListener('pointermove', trackX),
-    onEnd: (evt) => {
-      window.removeEventListener('pointermove', trackX);
-      // 폭이 100% 미만인 커스텀 블록: 놓은 가로 위치를 그대로 반영
-      const el = evt.item;
-      if (el.dataset.bid === undefined) return;
-      const w = widthPct(el);
-      if (w >= 100 || !dragPX) return;
-      const appRect = app.getBoundingClientRect();
-      const wPx = appRect.width * w / 100;
-      const mx = Math.max(0, Math.min(100 - w, ((dragPX - appRect.left - wPx / 2) / appRect.width) * 100));
-      el.classList.remove('al-left', 'al-right');
-      el.style.marginLeft = mx.toFixed(1) + '%';
-      el.style.marginRight = 'auto';
-      const b = blockByBid[el.dataset.bid];
-      if (b) { b.mx = Math.round(mx); delete b.align; }
-    },
-  });
-
-  // 4모서리 크기 조절: 어느 모서리든 바깥으로 끌면 커지고 안쪽으로 끌면 작아짐
+  // 4모서리 크기 조절 (자유 배치 블록만): 폭·높이 둘 다 조절
   const onResizeDown = (e, el, dir) => {
-    e.preventDefault();
-    e.stopPropagation();
-    el.classList.remove('w-70', 'w-50', 'w-35', 'w-mid', 'w-narrow');
-    el.classList.add('w-pct');
-    const parentW = app.clientWidth;
-    const startW = el.getBoundingClientRect().width;
-    const startX = e.clientX;
-    const sign = dir.includes('w') ? -1 : 1; // 왼쪽 모서리는 왼쪽으로 끌수록 커짐
+    e.preventDefault(); e.stopPropagation();
+    const b = blockByBid[el.dataset.bid];
+    if (b.fs) return;
+    if (!el.classList.contains('free-item')) detach(el);
+    const aw = app.clientWidth, vh = window.innerHeight;
+    const r0 = el.getBoundingClientRect();
+    const sx = e.clientX, sy = e.clientY;
+    const signX = dir.includes('w') ? -1 : 1;
+    const signY = dir.includes('n') ? -1 : 1;
     const move = (ev) => {
-      const pct = Math.max(20, Math.min(100, ((startW + sign * (ev.clientX - startX)) / parentW) * 100));
-      el.style.maxWidth = pct + '%';
-      el.dataset.pct = Math.round(pct);
+      const wPct = Math.max(15, Math.min(100, ((r0.width + signX * (ev.clientX - sx)) / aw) * 100));
+      const hPct = Math.max(8, Math.min(120, ((r0.height + signY * (ev.clientY - sy)) / vh) * 100));
+      b.free.w = Math.round(wPct);
+      b.free.h = Math.round(hPct);
+      el.style.width = b.free.w + '%';
+      el.style.height = b.free.h + 'vh';
+    };
+    const up = () => window.removeEventListener('pointermove', move);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up, { once: true });
+  };
+
+  // 블록 몸통 드래그 = 자유 2D 이동 (좌우·상하)
+  const onDragDown = (e, el) => {
+    const b = blockByBid[el.dataset.bid];
+    if (b.fs) return; // 전체화면 블록은 이동 안 함
+    if (!el.classList.contains('free-item')) detach(el);
+    e.preventDefault();
+    const aw = app.clientWidth, vh = window.innerHeight;
+    const sx = e.clientX, sy = e.clientY;
+    const x0 = b.free.x, y0 = b.free.y;
+    el.classList.add('eh-dragging');
+    const move = (ev) => {
+      const nx = Math.max(0, Math.min(100 - b.free.w, x0 + ((ev.clientX - sx) / aw) * 100));
+      const ny = Math.max(0, y0 + ((ev.clientY - sy) / vh) * 100);
+      b.free.x = Math.round(nx);
+      b.free.y = Math.round(ny);
+      el.style.left = b.free.x + '%';
+      el.style.top = b.free.y + 'vh';
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
-      const b = blockByBid[el.dataset.bid];
-      if (b && el.dataset.pct) b.width = String(el.dataset.pct);
+      el.classList.remove('eh-dragging');
+      applyFreeLayout(); // minHeight 갱신
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up, { once: true });
   };
 
   app.addEventListener('pointerdown', (e) => {
-    if (!document.body.classList.contains('home-editing')) return;
+    const item = e.target.closest('.hm-item');
+    if (!item) return;
     const handle = e.target.closest('.eh-h');
-    if (handle) onResizeDown(e, handle.closest('[data-bid]'), handle.dataset.dir);
+    if (handle) { onResizeDown(e, item, handle.dataset.dir); return; }
+    if (e.target.closest('.eh-fs')) return; // 전체화면 버튼은 click에서 처리
+    onDragDown(e, item);
   });
 
+  // 전체화면 토글
+  app.addEventListener('click', (e) => {
+    const fsBtn = e.target.closest('.eh-fs');
+    if (!fsBtn) return;
+    e.preventDefault(); e.stopPropagation();
+    const el = fsBtn.closest('.hm-item');
+    const b = blockByBid[el.dataset.bid];
+    b.fs = !b.fs;
+    if (b.fs) delete b.free;
+    applyFreeLayout();
+  }, true);
+
   $('#eh-save').addEventListener('click', async () => {
-    // 블록 배열은 원래 순서 유지(레이아웃 토큰의 b:번호가 이 순서를 가리킴)
     const clean = lastHomeBlocks.map((b) => { const c = { ...b }; delete c.__bid; return c; });
     try {
-      await db.setSetting('home_blocks', { blocks: clean, layout: buildLayout() });
+      // 자유 배치 저장 시 기존 흐름-순서 layout 토큰은 무시(free/fs가 우선)
+      await db.setSetting('home_blocks', { blocks: clean });
       location.hash = '#/';
     } catch (e) { dbError(e); }
   });
@@ -1751,7 +1775,6 @@ function route() {
   document.body.classList.remove('home-editing');
   $('#home-edit-bar')?.remove();
   $('#drop-line')?.remove();
-  if (homeSortable) { homeSortable.destroy(); homeSortable = null; }
   const hash = location.hash || '#/';
   const parts = hash.slice(2).split('/').map(decodeURIComponent);
   document.querySelectorAll('.main-nav a').forEach((a) => a.classList.remove('active'));
