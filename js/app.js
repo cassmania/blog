@@ -401,6 +401,8 @@ async function pageHome() {
     if (nav !== navToken) return; // 이동 중 다른 라우트로 바뀜 — 낡은 렌더 중단
     applySiteImages(images);
     applyHomeTexts(texts);
+    lastHomeSections = (home.sections && typeof home.sections === 'object') ? home.sections : {};
+    lastHomeBlocks = [];
     if (Array.isArray(home.blocks) && home.blocks.length) {
       // 블록별 배치 위치(anchor)에 따라 기본 화면 사이사이에 삽입
       home.blocks.forEach((b, i) => { b.__bid = i; });
@@ -968,22 +970,49 @@ function sizeStyle(b) {
   return parts.length ? ` style="${parts.join(';')}"` : '';
 }
 
+/* 기본 홈 섹션 dkey → 셀렉터 (커스텀 블록 제외) */
+const DEFAULT_SECTION_SEL = {
+  hero: '.hero-full:not([data-bid])', intro: '.intro-split:not([data-bid])',
+  f1: '.alt-row:not(.alt-reverse):not([data-bid])', f2: '.alt-reverse:not([data-bid])',
+  banner: '.interstitial:not([data-bid])', pillar: '.pillar-strip',
+};
+let lastHomeSections = {}; // {dkey:{x,y,w,h}} — 기본 섹션 자유 배치 좌표
+
+// 저장된 free 좌표를 요소에 적용
+function applyFreeToEl(el, f) {
+  el.classList.add('free-item');
+  el.style.left = f.x + '%';
+  el.style.top = f.y + 'vh';
+  el.style.width = f.w + '%';
+  if (f.h) el.style.height = f.h + 'vh';
+}
+
 /* 자유 배치(절대위치) 적용 — free={x,y,w,h}, x·w는 화면 전체 폭 %, y·h는 vh
-   free가 있는 블록만 흐름에서 떼어내 자유 배치, 나머지는 기존 흐름 유지 */
+   커스텀 블록(free)·기본 섹션(sections[dkey])만 흐름에서 떼어내 자유 배치 */
 function applyFreeLayout(root = app) {
   let hasFree = false, maxBottom = 0;
-  root.querySelectorAll('[data-bid]').forEach((el) => {
-    const b = lastHomeBlocks[el.dataset.bid];
-    if (!b) return;
+  const reset = (el) => {
     el.classList.remove('free-item');
     el.style.left = el.style.top = el.style.width = el.style.height = '';
-    if (b.free) {
-      const f = b.free;
-      el.classList.add('free-item');
-      el.style.left = f.x + '%';
-      el.style.top = f.y + 'vh';
-      el.style.width = f.w + '%';
-      if (f.h) el.style.height = f.h + 'vh';
+  };
+  root.querySelectorAll('[data-bid]').forEach((el) => {
+    reset(el);
+    const b = lastHomeBlocks[el.dataset.bid];
+    if (b && b.free) {
+      applyFreeToEl(el, b.free);
+      hasFree = true;
+      maxBottom = Math.max(maxBottom, (b.free.y || 0) + (b.free.h || 40));
+    }
+  });
+  // 기본 섹션에 dkey 부여 후 저장 좌표 적용
+  Object.entries(DEFAULT_SECTION_SEL).forEach(([key, sel]) => {
+    const el = root.querySelector(sel);
+    if (!el) return;
+    el.dataset.dkey = key;
+    reset(el);
+    const f = lastHomeSections[key];
+    if (f) {
+      applyFreeToEl(el, f);
       hasFree = true;
       maxBottom = Math.max(maxBottom, (f.y || 0) + (f.h || 40));
     }
@@ -1595,11 +1624,6 @@ async function pageHomeEdit() {
   }
   await pageHome();
   if (!location.hash.startsWith('#/homeedit')) return;
-  if (!lastHomeBlocks.length) {
-    alert('배치할 블록이 없습니다. 설정 → 홈 화면 편집에서 먼저 블록을 추가하세요.');
-    location.hash = '#/settings';
-    return;
-  }
   document.body.classList.add('home-editing');
   // bid → 블록 고정 매핑
   const blockByBid = {};
@@ -1607,36 +1631,55 @@ async function pageHomeEdit() {
   // 편집 중엔 등장 효과 전부 표시 상태로
   app.querySelectorAll('.fxi').forEach((el) => el.classList.add('in-view'));
 
-  // 내가 추가한 블록만 자유 배치 대상 (기본 섹션은 그대로 흐름 유지)
-  const freeEls = [...app.querySelectorAll('[data-bid]')];
+  // 요소의 free 좌표 객체 반환 (없으면 null) — 커스텀 블록 or 기본 섹션
+  const freeOf = (el) => el.dataset.bid !== undefined
+    ? (blockByBid[el.dataset.bid]?.free ?? null)
+    : (lastHomeSections[el.dataset.dkey] ?? null);
+  // free 좌표 저장 위치에 새 객체 설정
+  const setFree = (el, f) => {
+    if (el.dataset.bid !== undefined) {
+      const b = blockByBid[el.dataset.bid];
+      b.free = f; delete b.mx; delete b.align;
+    } else {
+      lastHomeSections[el.dataset.dkey] = f;
+    }
+  };
+
+  // 커스텀 블록 + 기본 섹션 전부 자유 배치 대상
+  applyFreeLayout(); // 기본 섹션에 data-dkey 부여
+  const freeEls = [
+    ...app.querySelectorAll('[data-bid]'),
+    ...app.querySelectorAll('[data-dkey]'),
+  ];
 
   // 자유 배치 시작: 흐름에서 떼어내 현재 화면상 위치를 절대좌표로 고정
   const detach = (el) => {
-    if (el.classList.contains('free-item')) return;
-    const b = blockByBid[el.dataset.bid];
+    if (el.classList.contains('free-item')) return freeOf(el);
     const r = el.getBoundingClientRect();
-    const aw = app.clientWidth || 1;
-    const x = ((r.left - app.getBoundingClientRect().left) / aw) * 100;
-    const y = (r.top - app.getBoundingClientRect().top) / window.innerHeight * 100;
-    const w = (r.width / aw) * 100;
-    const h = (r.height / window.innerHeight) * 100;
-    b.free = { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
-    delete b.mx; delete b.align;
+    const aRect = app.getBoundingClientRect();
+    const aw = app.clientWidth || 1, vh = window.innerHeight;
+    const f = {
+      x: Math.round(((r.left - aRect.left) / aw) * 100),
+      y: Math.round(((r.top - aRect.top) / vh) * 100),
+      w: Math.round((r.width / aw) * 100),
+      h: Math.round((r.height / vh) * 100),
+    };
+    setFree(el, f);
     applyFreeLayout();
+    return f;
   };
 
-  // 각 블록에 4모서리 크기 핸들
+  // 각 대상에 4모서리 크기 핸들
   freeEls.forEach((el) => {
     el.classList.add('hm-item');
     el.insertAdjacentHTML('beforeend',
       '<div class="eh-h eh-nw" data-dir="nw"></div><div class="eh-h eh-ne" data-dir="ne"></div>' +
       '<div class="eh-h eh-sw" data-dir="sw"></div><div class="eh-h eh-se" data-dir="se"></div>');
   });
-  applyFreeLayout();
 
   const bar = document.createElement('div');
   bar.id = 'home-edit-bar';
-  bar.innerHTML = '<span class="eh-hint">블록을 끌어 화면 어디든(좌·우·상·하 끝까지) 이동 · 모서리로 크기</span>' +
+  bar.innerHTML = '<span class="eh-hint">모든 블록을 끌어 화면 어디든(좌·우·상·하 끝까지) 이동 · 모서리로 크기</span>' +
     '<button type="button" class="btn-primary" id="eh-save">저장</button>' +
     '<a href="#/" class="btn-secondary">취소</a>';
   document.body.appendChild(bar);
@@ -1647,23 +1690,20 @@ async function pageHomeEdit() {
   }, true);
   app.addEventListener('dragstart', (e) => e.preventDefault());
 
-  // 4모서리 크기 조절 (자유 배치 블록만): 폭·높이 둘 다 조절
+  // 4모서리 크기 조절: 폭·높이 둘 다
   const onResizeDown = (e, el, dir) => {
     e.preventDefault(); e.stopPropagation();
-    const b = blockByBid[el.dataset.bid];
-    if (!el.classList.contains('free-item')) detach(el);
+    let f = freeOf(el) || detach(el);
     const aw = app.clientWidth, vh = window.innerHeight;
     const r0 = el.getBoundingClientRect();
     const sx = e.clientX, sy = e.clientY;
     const signX = dir.includes('w') ? -1 : 1;
     const signY = dir.includes('n') ? -1 : 1;
     const move = (ev) => {
-      const wPct = Math.max(15, Math.min(100, ((r0.width + signX * (ev.clientX - sx)) / aw) * 100));
-      const hPct = Math.max(8, Math.min(120, ((r0.height + signY * (ev.clientY - sy)) / vh) * 100));
-      b.free.w = Math.round(wPct);
-      b.free.h = Math.round(hPct);
-      el.style.width = b.free.w + '%';
-      el.style.height = b.free.h + 'vh';
+      f.w = Math.round(Math.max(15, Math.min(100, ((r0.width + signX * (ev.clientX - sx)) / aw) * 100)));
+      f.h = Math.round(Math.max(8, Math.min(120, ((r0.height + signY * (ev.clientY - sy)) / vh) * 100)));
+      el.style.width = f.w + '%';
+      el.style.height = f.h + 'vh';
     };
     const up = () => window.removeEventListener('pointermove', move);
     window.addEventListener('pointermove', move);
@@ -1672,20 +1712,17 @@ async function pageHomeEdit() {
 
   // 블록 몸통 드래그 = 자유 2D 이동 (좌우·상하)
   const onDragDown = (e, el) => {
-    const b = blockByBid[el.dataset.bid];
-    if (!el.classList.contains('free-item')) detach(el);
+    let f = freeOf(el) || detach(el);
     e.preventDefault();
     const aw = app.clientWidth, vh = window.innerHeight;
     const sx = e.clientX, sy = e.clientY;
-    const x0 = b.free.x, y0 = b.free.y;
+    const x0 = f.x, y0 = f.y;
     el.classList.add('eh-dragging');
     const move = (ev) => {
-      const nx = Math.max(0, Math.min(100 - b.free.w, x0 + ((ev.clientX - sx) / aw) * 100));
-      const ny = Math.max(0, y0 + ((ev.clientY - sy) / vh) * 100);
-      b.free.x = Math.round(nx);
-      b.free.y = Math.round(ny);
-      el.style.left = b.free.x + '%';
-      el.style.top = b.free.y + 'vh';
+      f.x = Math.round(Math.max(0, Math.min(100 - f.w, x0 + ((ev.clientX - sx) / aw) * 100)));
+      f.y = Math.round(Math.max(0, y0 + ((ev.clientY - sy) / vh) * 100));
+      el.style.left = f.x + '%';
+      el.style.top = f.y + 'vh';
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
@@ -1707,8 +1744,8 @@ async function pageHomeEdit() {
   $('#eh-save').addEventListener('click', async () => {
     const clean = lastHomeBlocks.map((b) => { const c = { ...b }; delete c.__bid; return c; });
     try {
-      // 자유 배치 저장 시 기존 흐름-순서 layout 토큰은 무시(free가 우선)
-      await db.setSetting('home_blocks', { blocks: clean });
+      // free(블록)·sections(기본 섹션)이 흐름 순서보다 우선 — layout 토큰 저장 안 함
+      await db.setSetting('home_blocks', { blocks: clean, sections: lastHomeSections });
       location.hash = '#/';
     } catch (e) { dbError(e); }
   });
